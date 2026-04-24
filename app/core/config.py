@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
 
+    # Cache settings
+    CACHE_ENABLED: bool = True
+    CACHE_REALTIME_PRICE_TTL: int = 60  # 实时价格缓存60秒
+    CACHE_ASSET_LIST_TTL: int = 600  # 资产列表缓存10分钟
+    CACHE_DASHBOARD_TTL: int = 120  # Dashboard缓存2分钟
+    CACHE_METRIC_TTL: int = 300  # 指标缓存5分钟
+
     # External APIs
     OKX_API_KEY: Optional[str] = None
     OKX_API_SECRET: Optional[str] = None

@@ -2,7 +2,7 @@
 资产服务模块
 
 负责资产数据的查询和指标计算
-优先查数据库缓存，无数据时实时调用数据源
+三层缓存架构：Redis（短期）→ PostgreSQL（长期）→ 数据源API（实时）
 """
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -13,8 +13,10 @@ from loguru import logger
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.asset import Asset, OHLCV, AssetMetric
 from app.data.connectors import OKXConnector, YahooFinanceConnector, GoldConnector, EastMoneyConnector
+from app.services.cache_service import CacheService, get_cache_service
 
 
 # 资产类型到连接器的映射
@@ -64,11 +66,15 @@ SYMBOL_MAP = {
 
 
 class AssetService:
-    """资产服务类 - 支持实时数据获取"""
+    """资产服务类 - 三层缓存架构"""
 
     def __init__(self, session: AsyncSession):
         self.session = session
         self._connectors = {}  # 连接器实例缓存
+
+    async def _get_cache(self) -> CacheService:
+        """获取缓存服务"""
+        return await get_cache_service()
 
     async def _get_connector(self, asset_type: str):
         """获取数据源连接器"""
@@ -255,7 +261,11 @@ class AssetService:
         force_refresh: bool = False,
     ) -> Optional[AssetMetric]:
         """
-        获取资产最新指标
+        获取资产最新指标（三层缓存）
+
+        1. Redis缓存（5分钟） - 最快
+        2. 数据库指标（1小时内） - 中等
+        3. 数据源API实时获取 - 最慢
 
         Args:
             asset_id: 资产ID
@@ -264,7 +274,26 @@ class AssetService:
         Returns:
             资产指标
         """
-        # 1. 先查数据库
+        cache = await self._get_cache()
+        cache_key = CacheService.metric_key(str(asset_id))
+
+        # 1. 先查Redis缓存
+        if not force_refresh:
+            cached = await cache.get(cache_key)
+            if cached:
+                logger.debug(f"Metric cache hit for {asset_id}")
+                # 从缓存重建metric对象（不写数据库）
+                return AssetMetric(
+                    asset_id=asset_id,
+                    price=Decimal(str(cached.get('price', 0))),
+                    change_24h=Decimal(str(cached.get('change_24h'))) if cached.get('change_24h') else None,
+                    volatility_30d=Decimal(str(cached.get('volatility_30d'))) if cached.get('volatility_30d') else None,
+                    trend_signal=cached.get('trend_signal'),
+                    risk_level=cached.get('risk_level'),
+                    calculated_at=datetime.fromisoformat(cached.get('calculated_at')) if cached.get('calculated_at') else None,
+                )
+
+        # 2. 查数据库
         if not force_refresh:
             result = await self.session.execute(
                 select(AssetMetric)
@@ -274,13 +303,22 @@ class AssetService:
             )
             metric = result.scalar_one_or_none()
 
-            # 如果指标是最近的（1小时内），直接返回
+            # 如果指标是最近的（1小时内），缓存并返回
             if metric and metric.calculated_at:
                 age = datetime.now(timezone.utc) - metric.calculated_at
                 if age < timedelta(hours=1):
+                    # 写入Redis缓存
+                    await cache.set(cache_key, {
+                        'price': float(metric.price or 0),
+                        'change_24h': float(metric.change_24h or 0),
+                        'volatility_30d': float(metric.volatility_30d or 0),
+                        'trend_signal': metric.trend_signal,
+                        'risk_level': metric.risk_level,
+                        'calculated_at': metric.calculated_at.isoformat(),
+                    }, settings.CACHE_METRIC_TTL)
                     return metric
 
-        # 2. 实时获取行情数据
+        # 3. 实时获取行情数据
         asset = await self.get_asset_by_id(asset_id)
         if not asset:
             return None
@@ -293,10 +331,7 @@ class AssetService:
             ds_symbol = SYMBOL_MAP.get(asset.symbol, asset.symbol)
             ticker = await connector.get_ticker(ds_symbol)
 
-            # 计算指标
             price = ticker.last_price
-
-            # 获取K线数据计算更多指标
             ohlcv_list = await self.get_ohlcv(asset_id, interval="1d", limit=30)
 
             change_24h = float(ticker.change_24h) if ticker.change_24h else None
@@ -305,27 +340,23 @@ class AssetService:
             risk_level = "medium"
 
             if ohlcv_list and len(ohlcv_list) >= 2:
-                # 计算波动率
                 closes = [float(o.close) for o in ohlcv_list]
                 mean = sum(closes) / len(closes)
                 variance = sum((c - mean) ** 2 for c in closes) / len(closes)
                 volatility_30d = Decimal(str((variance ** 0.5) / mean * 100)) if mean > 0 else None
 
-                # 判断趋势
                 if change_24h:
                     if change_24h > 2:
                         trend_signal = "bullish"
                     elif change_24h < -2:
                         trend_signal = "bearish"
 
-                # 判断风险等级
                 if volatility_30d:
                     if volatility_30d > 50:
                         risk_level = "high"
                     elif volatility_30d < 20:
                         risk_level = "low"
 
-            # 创建新指标记录
             metric = AssetMetric(
                 asset_id=asset_id,
                 price=price,
@@ -335,6 +366,16 @@ class AssetService:
                 risk_level=risk_level,
             )
             self.session.add(metric)
+
+            # 写入Redis缓存
+            await cache.set(cache_key, {
+                'price': float(price),
+                'change_24h': change_24h or 0,
+                'volatility_30d': float(volatility_30d or 0),
+                'trend_signal': trend_signal,
+                'risk_level': risk_level,
+                'calculated_at': datetime.now(timezone.utc).isoformat(),
+            }, settings.CACHE_METRIC_TTL)
 
             return metric
 
@@ -348,7 +389,7 @@ class AssetService:
         force_refresh: bool = False,
     ) -> List[dict]:
         """
-        获取决策看板数据
+        获取决策看板数据（带缓存）
 
         Args:
             asset_type: 资产类型过滤
@@ -357,7 +398,17 @@ class AssetService:
         Returns:
             看板数据列表
         """
-        # 获取资产列表
+        cache = await self._get_cache()
+        cache_key = CacheService.dashboard_key(asset_type)
+
+        # 1. 先查Redis缓存
+        if not force_refresh:
+            cached = await cache.get(cache_key)
+            if cached:
+                logger.debug(f"Dashboard cache hit for {asset_type or 'all'}")
+                return cached
+
+        # 2. 查数据库并组装数据
         query = select(Asset).where(Asset.is_active == True)
         if asset_type:
             query = query.where(Asset.asset_type == asset_type)
@@ -392,6 +443,9 @@ class AssetService:
                 })
 
             dashboard_data.append(data)
+
+        # 3. 写入Redis缓存
+        await cache.set(cache_key, dashboard_data, settings.CACHE_DASHBOARD_TTL)
 
         return dashboard_data
 
@@ -462,7 +516,11 @@ class AssetService:
 
     async def get_realtime_price(self, symbol: str, asset_type: str = None) -> Optional[Decimal]:
         """
-        直接获取实时价格（不依赖数据库）
+        直接获取实时价格（三层缓存）
+
+        1. Redis缓存（60秒） - 最快
+        2. 数据库指标（1小时内） - 中等
+        3. 数据源API实时获取 - 最慢
 
         Args:
             symbol: 资产符号
@@ -471,9 +529,27 @@ class AssetService:
         Returns:
             当前价格
         """
-        # 尝试从数据库获取资产类型
+        # 1. 先查Redis缓存（60秒有效期）
+        cache = await self._get_cache()
+        cache_key = CacheService.realtime_price_key(symbol)
+        cached = await cache.get(cache_key)
+        if cached:
+            logger.debug(f"Cache hit for {symbol}")
+            return Decimal(str(cached['price']))
+
+        # 2. 查数据库最近的指标（1小时内）
+        asset = await self.get_asset_by_symbol(symbol)
+        if asset:
+            metric = await self.get_latest_metric(str(asset.id))
+            if metric and metric.calculated_at:
+                age = datetime.now(timezone.utc) - metric.calculated_at
+                if age < timedelta(hours=1) and metric.price:
+                    # 写入Redis缓存供下次使用
+                    await cache.set(cache_key, {'price': float(metric.price)}, settings.CACHE_REALTIME_PRICE_TTL)
+                    return metric.price
+
+        # 3. 实时从数据源获取
         if not asset_type:
-            asset = await self.get_asset_by_symbol(symbol)
             if asset:
                 asset_type = asset.asset_type
 
@@ -481,9 +557,9 @@ class AssetService:
         if not asset_type:
             if symbol in ["BTC", "ETH", "SOL", "XRP", "DOGE"]:
                 asset_type = "crypto"
-            elif symbol in ["AAPL", "GOOGL", "MSFT", "AMZN", "META", "NVDA", "TSLA"]:
+            elif symbol in ["AAPL", "GOOGL", "MSFT", "AMZN", "META", "NVDA", "TSLA", "BABA", "JD", "NIO", "SPY", "QQQ"]:
                 asset_type = "stock"
-            elif symbol in ["GLD", "IAU", "GOLD_FUT"]:
+            elif symbol in ["XAU", "GOLD", "GLD", "IAU", "GOLD_FUT"]:
                 asset_type = "gold"
             elif symbol.isdigit():
                 asset_type = "fund"
@@ -495,7 +571,13 @@ class AssetService:
         try:
             ds_symbol = SYMBOL_MAP.get(symbol, symbol)
             ticker = await connector.get_ticker(ds_symbol)
-            return ticker.last_price
+            price = ticker.last_price
+
+            # 写入Redis缓存
+            await cache.set(cache_key, {'price': float(price)}, settings.CACHE_REALTIME_PRICE_TTL)
+            logger.debug(f"Cache set for {symbol}: {price}")
+
+            return price
         except Exception as e:
             logger.error(f"获取实时价格失败 {symbol}: {e}")
             return None
