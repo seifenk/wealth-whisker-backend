@@ -432,12 +432,18 @@ wealth-whisker-backend/
 - `app/tasks/metrics_calculation.py` - 指标计算任务
 
 ### 数据处理
-- `app/data/connectors/okx_connector.py` - OKX API连接器 (使用ccxt统一接口)
+- `app/data/connectors/okx_connector.py` - OKX API连接器 (使用ccxt统一接口，支持实盘交易)
 - `app/data/connectors/yahoo_connector.py` - Yahoo Finance连接器 (使用yfinance库)
 - `app/data/connectors/gold_connector.py` - 黄金数据连接器
 - `app/data/connectors/eastmoney_connector.py` - 东方财富基金连接器
+- `app/services/asset_service.py` - 资产服务（支持实时数据获取，优先缓存）
 - `app/data/calculators/indicator_calculator.py` - 指标计算器(均线、RSI、波动率)
 - `app/data/calculators/backtest_engine.py` - 回测引擎核心逻辑
+
+**数据获取架构**:
+- 默认模式：优先查数据库缓存，无数据时实时调用数据源API
+- 强制刷新：force_refresh=true 直接从数据源获取
+- 自动缓存：实时获取的数据入库供下次使用
 
 ---
 
