@@ -34,8 +34,10 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
 
     # External APIs
-    BINANCE_API_KEY: Optional[str] = None
-    BINANCE_API_SECRET: Optional[str] = None
+    OKX_API_KEY: Optional[str] = None
+    OKX_API_SECRET: Optional[str] = None
+    OKX_API_PASSPHRASE: Optional[str] = None
+    OKX_API_URL: str = "https://www.okx.com"
     ALPHA_VANTAGE_API_KEY: Optional[str] = None
     YAHOO_FINANCE_ENABLED: bool = True
 

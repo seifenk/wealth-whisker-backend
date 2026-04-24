@@ -1,0 +1,285 @@
+"""
+资产数据API路由
+"""
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from loguru import logger
+
+from app.api.dependencies import get_current_user_optional, get_db
+from app.models.user import User
+from app.schemas.asset import (
+    AssetDetailResponse,
+    AssetMetricResponse,
+    AssetResponse,
+    DashboardResponse,
+    OHLCVResponse,
+    PerformanceMetricsResponse,
+)
+from app.services.asset_service import AssetService
+
+router = APIRouter(prefix="/assets", tags=["资产数据"])
+
+
+@router.get("/", response_model=List[AssetResponse])
+async def get_assets(
+    asset_type: Optional[str] = Query(None, description="资产类型: crypto, gold, stock, fund"),
+    limit: int = Query(50, ge=1, le=100, description="返回数量"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    db = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    获取资产列表
+
+    游客和登录用户均可访问
+    """
+    service = AssetService(db)
+    assets = await service.get_assets(
+        asset_type=asset_type,
+        limit=limit,
+        offset=offset,
+    )
+
+    return [
+        AssetResponse(
+            id=str(asset.id),
+            symbol=asset.symbol,
+            name=asset.name,
+            asset_type=asset.asset_type,
+            exchange=asset.exchange,
+            currency=asset.currency,
+            is_active=asset.is_active,
+            min_lot=asset.min_lot,
+            tick_size=asset.tick_size,
+        )
+        for asset in assets
+    ]
+
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard(
+    asset_type: Optional[str] = Query(None, description="资产类型过滤"),
+    db = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    获取多资产决策看板数据
+
+    包含资产基础信息和最新指标
+    """
+    service = AssetService(db)
+    dashboard_data = await service.get_dashboard_data(asset_type=asset_type)
+
+    from app.schemas.asset import DashboardItemResponse
+
+    items = [
+        DashboardItemResponse(**data)
+        for data in dashboard_data
+    ]
+
+    return DashboardResponse(
+        items=items,
+        total=len(items),
+        asset_type_filter=asset_type,
+    )
+
+
+@router.get("/{asset_id}", response_model=AssetDetailResponse)
+async def get_asset_detail(
+    asset_id: str,
+    db = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    获取资产详情
+
+    包含基础信息和最新指标
+    """
+    try:
+        uuid = UUID(asset_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="无效的资产ID格式",
+        )
+
+    service = AssetService(db)
+    asset = await service.get_asset_by_id(uuid)
+
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="资产不存在",
+        )
+
+    metric = await service.get_latest_metric(uuid)
+
+    return AssetDetailResponse(
+        asset=AssetResponse(
+            id=str(asset.id),
+            symbol=asset.symbol,
+            name=asset.name,
+            asset_type=asset.asset_type,
+            exchange=asset.exchange,
+            currency=asset.currency,
+            is_active=asset.is_active,
+            min_lot=asset.min_lot,
+            tick_size=asset.tick_size,
+        ),
+        latest_metric=AssetMetricResponse(
+            price=metric.price if metric else None,
+            change_24h=metric.change_24h if metric else None,
+            change_7d=metric.change_7d if metric else None,
+            volatility_30d=metric.volatility_30d if metric else None,
+            sharpe_ratio=metric.sharpe_ratio if metric else None,
+            risk_level=metric.risk_level if metric else None,
+            trend_signal=metric.trend_signal if metric else None,
+            confidence_score=metric.confidence_score if metric else None,
+            calculated_at=metric.calculated_at if metric else None,
+        ) if metric else None,
+        latest_price=metric.price if metric else None,
+    )
+
+
+@router.get("/{asset_id}/ohlcv", response_model=List[OHLCVResponse])
+async def get_asset_ohlcv(
+    asset_id: str,
+    interval: str = Query("1h", description="K线周期: 1m, 5m, 15m, 30m, 1h, 4h, 1d"),
+    start_time: Optional[datetime] = Query(None, description="开始时间"),
+    end_time: Optional[datetime] = Query(None, description="结束时间"),
+    limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
+    db = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    获取资产K线数据
+
+    支持不同周期和时间范围查询
+    """
+    try:
+        uuid = UUID(asset_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="无效的资产ID格式",
+        )
+
+    service = AssetService(db)
+
+    # 检查资产是否存在
+    asset = await service.get_asset_by_id(uuid)
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="资产不存在",
+        )
+
+    # 默认查询最近30天
+    if not start_time and not end_time:
+        start_time = datetime.now(timezone.utc) - timedelta(days=30)
+
+    ohlcv_list = await service.get_ohlcv(
+        asset_id=uuid,
+        interval=interval,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+    )
+
+    return [
+        OHLCVResponse(
+            time=ohlcv.time,
+            open=ohlcv.open,
+            high=ohlcv.high,
+            low=ohlcv.low,
+            close=ohlcv.close,
+            volume=ohlcv.volume,
+        )
+        for ohlcv in ohlcv_list
+    ]
+
+
+@router.get("/{asset_id}/metrics", response_model=AssetMetricResponse)
+async def get_asset_metrics(
+    asset_id: str,
+    db = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    获取资产最新指标
+    """
+    try:
+        uuid = UUID(asset_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="无效的资产ID格式",
+        )
+
+    service = AssetService(db)
+    metric = await service.get_latest_metric(uuid)
+
+    if not metric:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="暂无指标数据",
+        )
+
+    return AssetMetricResponse(
+        price=metric.price,
+        change_24h=metric.change_24h,
+        change_7d=metric.change_7d,
+        volatility_30d=metric.volatility_30d,
+        sharpe_ratio=metric.sharpe_ratio,
+        risk_level=metric.risk_level,
+        trend_signal=metric.trend_signal,
+        confidence_score=metric.confidence_score,
+        calculated_at=metric.calculated_at,
+    )
+
+
+@router.get("/{asset_id}/performance", response_model=PerformanceMetricsResponse)
+async def get_asset_performance(
+    asset_id: str,
+    days: int = Query(30, ge=7, le=365, description="计算周期天数"),
+    db = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    获取资产绩效指标
+
+    计算收益、波动率、最大回撤、夏普比率等
+    """
+    try:
+        uuid = UUID(asset_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="无效的资产ID格式",
+        )
+
+    service = AssetService(db)
+
+    # 检查资产是否存在
+    asset = await service.get_asset_by_id(uuid)
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="资产不存在",
+        )
+
+    metrics = await service.calculate_performance_metrics(
+        asset_id=uuid,
+        days=days,
+    )
+
+    if not metrics:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="暂无足够历史数据进行计算",
+        )
+
+    return PerformanceMetricsResponse(**metrics)

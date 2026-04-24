@@ -5,15 +5,15 @@
 | Phase | 状态 | 完成度 |
 |-------|------|--------|
 | Phase 1: 基础设施搭建 | ✅ 已完成 | 90% |
-| Phase 2: 用户认证与资产管理 | 🔄 进行中 | 60% |
+| Phase 2: 用户认证与资产管理 | ✅ 已完成 | 90% |
 | Phase 3: 决策看板与策略回测 | ⏳ 待开始 | 0% |
 | Phase 4: 模拟交易系统 | ⏳ 待开始 | 0% |
 | Phase 5: 研究结论与模型校准 | ⏳ 待开始 | 0% |
 | Phase 6: 测试与文档 | ⏳ 待开始 | 10% |
 
-**当前阶段**：Phase 2 - 用户认证与资产管理
+**当前阶段**：Phase 2 完成，准备进入 Phase 3
 
-**整体进度**：约 20%
+**整体进度**：约 40%
 
 ---
 
@@ -237,24 +237,28 @@ wealth-whisker-backend/
    - [x] ~~免责声明确认流程~~
    
 3. 数据源接入
-   - [ ] 加密货币数据源连接器(Binance API)
+   - [x] ~~加密货币数据源连接器(OKX API)~~
    - [ ] 股票数据源连接器(Alpha Vantage/Yahoo Finance)
    - [ ] 黄金数据源连接器
    - [ ] 基金数据源连接器
    
 4. 数据同步任务
-   - [ ] Celery数据同步任务(tasks/data_sync.py)
-   - [ ] 定时调度配置(每小时更新)
+   - [x] ~~Celery数据同步任务(tasks/data_sync.py)~~
+   - [x] ~~定时调度配置(每小时更新)~~
    
 5. 资产数据API
-   - [ ] 资产列表API (GET /assets)
-   - [ ] 资产详情API (GET /assets/{id})
-   - [ ] K线数据查询API (GET /assets/{id}/ohlcv)
+   - [x] ~~资产列表API (GET /assets)~~
+   - [x] ~~资产详情API (GET /assets/{id})~~
+   - [x] ~~K线数据查询API (GET /assets/{id}/ohlcv)~~
+   - [x] ~~决策看板API (GET /assets/dashboard)~~
+   - [x] ~~资产指标API (GET /assets/{id}/metrics)~~
+   - [x] ~~绩效分析API (GET /assets/{id}/performance)~~
 
 **交付物**：
 - ✅ 用户注册登录流程可用
-- ⏳ 资产数据持续同步 (待实现)
-- ⏳ K线数据可查询 (待实现)
+- ✅ 加密货币数据同步任务可用
+- ✅ 资产数据API可用
+- ✅ K线数据可查询
 
 ---
 
@@ -428,7 +432,7 @@ wealth-whisker-backend/
 - `app/tasks/metrics_calculation.py` - 指标计算任务
 
 ### 数据处理
-- `app/data/connectors/binance_connector.py` - Binance API连接器
+- `app/data/connectors/okx_connector.py` - OKX API连接器
 - `app/data/connectors/stock_connector.py` - 股票数据连接器
 - `app/data/calculators/indicator_calculator.py` - 指标计算器(均线、RSI、波动率)
 - `app/data/calculators/backtest_engine.py` - 回测引擎核心逻辑

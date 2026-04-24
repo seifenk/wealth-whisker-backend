@@ -1,4 +1,6 @@
 """
 数据处理模块索引
 """
-# Placeholder - data connectors and calculators will be added in later phases
+from app.data.connectors import BaseConnector, OKXConnector
+
+__all__ = ["BaseConnector", "OKXConnector"]
