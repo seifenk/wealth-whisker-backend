@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.celery_app import celery_app
 from app.core.database import async_session_maker
 from app.data.connectors.okx_connector import OKXConnector
+from app.data.connectors.yahoo_connector import YahooFinanceConnector
+from app.data.connectors.gold_connector import GoldConnector
+from app.data.connectors.eastmoney_connector import EastMoneyConnector
 from app.models.asset import Asset, OHLCV, AssetMetric
 
 
@@ -27,6 +30,40 @@ CRYPTO_SYMBOLS = [
     ("DOGE-USDT", "DOGE", "Dogecoin", "crypto"),
 ]
 
+# 股票配置 (Yahoo Finance符号)
+STOCK_SYMBOLS = [
+    ("AAPL", "AAPL", "Apple Inc.", "stock", "NASDAQ"),
+    ("GOOGL", "GOOGL", "Alphabet Inc.", "stock", "NASDAQ"),
+    ("MSFT", "MSFT", "Microsoft Corp.", "stock", "NASDAQ"),
+    ("AMZN", "AMZN", "Amazon.com Inc.", "stock", "NASDAQ"),
+    ("META", "META", "Meta Platforms Inc.", "stock", "NASDAQ"),
+    ("NVDA", "NVDA", "NVIDIA Corp.", "stock", "NASDAQ"),
+    ("TSLA", "TSLA", "Tesla Inc.", "stock", "NASDAQ"),
+    ("BABA", "BABA", "Alibaba Group", "stock", "NYSE"),
+    ("JD", "JD", "JD.com Inc.", "stock", "NASDAQ"),
+    ("NIO", "NIO", "NIO Inc.", "stock", "NYSE"),
+    ("SPY", "SPY", "SPDR S&P 500 ETF", "stock", "NYSE"),
+    ("QQQ", "QQQ", "Invesco QQQ ETF", "stock", "NASDAQ"),
+]
+
+# 黄金配置
+GOLD_SYMBOLS = [
+    ("GLD", "GLD", "SPDR Gold Shares ETF", "gold", "NYSE"),
+    ("IAU", "IAU", "iShares Gold Trust", "gold", "NYSE"),
+    ("GC=F", "GOLD_FUT", "Gold Futures", "gold", "COMEX"),
+]
+
+# 基金配置 (东方财富基金代码)
+FUND_SYMBOLS = [
+    ("000001", "000001", "华夏成长混合", "fund", "EastMoney"),
+    ("000011", "000011", "华夏大盘精选", "fund", "EastMoney"),
+    ("110022", "110022", "易方达消费行业", "fund", "EastMoney"),
+    ("161725", "161725", "招商中证白酒", "fund", "EastMoney"),
+    ("519674", "519674", "银河创新成长", "fund", "EastMoney"),
+    ("510300", "510300", "华泰柏瑞沪深300ETF", "fund", "EastMoney"),
+    ("510050", "510050", "华夏上证50ETF", "fund", "EastMoney"),
+]
+
 
 async def get_or_create_asset(
     session: AsyncSession,
@@ -35,6 +72,7 @@ async def get_or_create_asset(
     name: str,
     asset_type: str,
     exchange: str = "OKX",
+    currency: str = "USD",
 ) -> Asset:
     """
     获取或创建资产记录
@@ -50,7 +88,7 @@ async def get_or_create_asset(
             name=name,
             asset_type=asset_type,
             exchange=exchange,
-            currency="USDT",
+            currency=currency,
             is_active=True,
         )
         session.add(asset)
@@ -299,3 +337,301 @@ def scheduled_crypto_tickers_sync():
     定时同步加密货币行情（每15分钟触发）
     """
     return sync_crypto_tickers_task()
+
+
+# ==================== 股票数据同步任务 ====================
+
+@celery_app.task(bind=True, name="sync_stock_data")
+def sync_stock_data_task(self, symbols: Optional[List[tuple]] = None):
+    """
+    同步股票数据任务
+
+    Args:
+        symbols: 要同步的股票列表，格式为 (yahoo_symbol, display_symbol, name, type, exchange)
+    """
+    logger.info(f"Starting stock data sync task: {self.request.id}")
+
+    import asyncio
+
+    async def _sync():
+        connector = YahooFinanceConnector()
+
+        try:
+            async with async_session_maker() as session:
+                sync_symbols = symbols or STOCK_SYMBOLS
+                total_added = 0
+
+                for yahoo_sym, display_sym, name, asset_type, exchange in sync_symbols:
+                    try:
+                        # 1. 获取或创建资产
+                        asset = await get_or_create_asset(
+                            session, display_sym, display_sym, name, asset_type, exchange, "USD"
+                        )
+
+                        # 2. 获取K线数据（最近30天的日线数据）
+                        end_time = datetime.now(timezone.utc)
+                        start_time = end_time - timedelta(days=30)
+
+                        ohlcv_data = await connector.get_ohlcv(
+                            symbol=yahoo_sym,
+                            interval="1d",
+                            start_time=start_time,
+                            end_time=end_time,
+                            limit=30,
+                        )
+
+                        # 3. 保存K线数据
+                        added = await save_ohlcv_data(
+                            session, asset.id, ohlcv_data, "1d"
+                        )
+                        total_added += added
+                        logger.info(f"Synced {yahoo_sym}: {added} new OHLCV records")
+
+                        # 4. 获取实时行情
+                        ticker = await connector.get_ticker(yahoo_sym)
+
+                        # 5. 更新资产指标（使用日线数据计算）
+                        await update_asset_metric(session, asset.id, ticker, ohlcv_data)
+
+                    except Exception as e:
+                        logger.error(f"Failed to sync {yahoo_sym}: {e}")
+                        continue
+
+                await session.commit()
+                logger.info(f"Stock sync completed. Total new records: {total_added}")
+
+        finally:
+            await connector.close()
+
+    asyncio.run(_sync())
+
+    return {"status": "completed", "synced_symbols": len(sync_symbols or STOCK_SYMBOLS)}
+
+
+@celery_app.task(bind=True, name="sync_stock_tickers")
+def sync_stock_tickers_task(self):
+    """
+    同步股票实时行情任务
+    """
+    logger.info(f"Starting stock tickers sync task: {self.request.id}")
+
+    import asyncio
+
+    async def _sync():
+        connector = YahooFinanceConnector()
+
+        try:
+            async with async_session_maker() as session:
+                # 获取所有股票资产
+                result = await session.execute(
+                    select(Asset).where(Asset.asset_type == "stock", Asset.is_active == True)
+                )
+                assets = result.scalars().all()
+
+                # 构建符号映射 (display_symbol -> yahoo_symbol)
+                symbol_map = {s[1]: s[0] for s in STOCK_SYMBOLS}
+
+                for asset in assets:
+                    yahoo_sym = symbol_map.get(asset.symbol, asset.symbol)
+
+                    try:
+                        ticker = await connector.get_ticker(yahoo_sym)
+                        await update_asset_metric(session, asset.id, ticker, [])
+                    except Exception as e:
+                        logger.warning(f"Failed to get ticker for {yahoo_sym}: {e}")
+
+                await session.commit()
+                logger.info(f"Stock tickers sync completed. Updated {len(assets)} assets")
+
+        finally:
+            await connector.close()
+
+    asyncio.run(_sync())
+
+    return {"status": "completed"}
+
+
+@celery_app.task(name="scheduled_stock_sync")
+def scheduled_stock_sync():
+    """
+    定时同步股票数据（每日触发，美股收盘后）
+    """
+    return sync_stock_data_task()
+
+
+# ==================== 黄金数据同步任务 ====================
+
+@celery_app.task(bind=True, name="sync_gold_data")
+def sync_gold_data_task(self, symbols: Optional[List[tuple]] = None):
+    """
+    同步黄金数据任务
+
+    Args:
+        symbols: 要同步的黄金资产列表
+    """
+    logger.info(f"Starting gold data sync task: {self.request.id}")
+
+    import asyncio
+
+    async def _sync():
+        connector = GoldConnector()
+
+        try:
+            async with async_session_maker() as session:
+                sync_symbols = symbols or GOLD_SYMBOLS
+                total_added = 0
+
+                for yahoo_sym, display_sym, name, asset_type, exchange in sync_symbols:
+                    try:
+                        # 1. 获取或创建资产
+                        asset = await get_or_create_asset(
+                            session, display_sym, display_sym, name, asset_type, exchange, "USD"
+                        )
+
+                        # 2. 获取K线数据
+                        end_time = datetime.now(timezone.utc)
+                        start_time = end_time - timedelta(days=30)
+
+                        ohlcv_data = await connector.get_ohlcv(
+                            symbol=yahoo_sym,
+                            interval="1d",
+                            start_time=start_time,
+                            end_time=end_time,
+                            limit=30,
+                        )
+
+                        # 3. 保存K线数据
+                        added = await save_ohlcv_data(
+                            session, asset.id, ohlcv_data, "1d"
+                        )
+                        total_added += added
+                        logger.info(f"Synced {yahoo_sym}: {added} new OHLCV records")
+
+                        # 4. 获取实时行情
+                        ticker = await connector.get_ticker(yahoo_sym)
+
+                        # 5. 更新资产指标
+                        await update_asset_metric(session, asset.id, ticker, ohlcv_data)
+
+                    except Exception as e:
+                        logger.error(f"Failed to sync {yahoo_sym}: {e}")
+                        continue
+
+                await session.commit()
+                logger.info(f"Gold sync completed. Total new records: {total_added}")
+
+        finally:
+            await connector.close()
+
+    asyncio.run(_sync())
+
+    return {"status": "completed", "synced_symbols": len(sync_symbols or GOLD_SYMBOLS)}
+
+
+@celery_app.task(name="scheduled_gold_sync")
+def scheduled_gold_sync():
+    """
+    定时同步黄金数据（每日触发）
+    """
+    return sync_gold_data_task()
+
+
+# ==================== 基金数据同步任务 ====================
+
+@celery_app.task(bind=True, name="sync_fund_data")
+def sync_fund_data_task(self, symbols: Optional[List[tuple]] = None):
+    """
+    同步基金数据任务
+
+    Args:
+        symbols: 要同步的基金列表
+    """
+    logger.info(f"Starting fund data sync task: {self.request.id}")
+
+    import asyncio
+
+    async def _sync():
+        connector = EastMoneyConnector()
+
+        try:
+            async with async_session_maker() as session:
+                sync_symbols = symbols or FUND_SYMBOLS
+                total_added = 0
+
+                for fund_code, display_sym, name, asset_type, exchange in sync_symbols:
+                    try:
+                        # 1. 获取或创建资产
+                        asset = await get_or_create_asset(
+                            session, display_sym, display_sym, name, asset_type, exchange, "CNY"
+                        )
+
+                        # 2. 获取净值历史数据
+                        end_time = datetime.now(timezone.utc)
+                        start_time = end_time - timedelta(days=30)
+
+                        ohlcv_data = await connector.get_ohlcv(
+                            symbol=fund_code,
+                            interval="1d",
+                            start_time=start_time,
+                            end_time=end_time,
+                            limit=30,
+                        )
+
+                        # 3. 保存净值数据
+                        added = await save_ohlcv_data(
+                            session, asset.id, ohlcv_data, "1d"
+                        )
+                        total_added += added
+                        logger.info(f"Synced {fund_code}: {added} new records")
+
+                        # 4. 获取实时净值
+                        ticker = await connector.get_ticker(fund_code)
+
+                        # 5. 更新资产指标
+                        await update_asset_metric(session, asset.id, ticker, ohlcv_data)
+
+                    except Exception as e:
+                        logger.error(f"Failed to sync {fund_code}: {e}")
+                        continue
+
+                await session.commit()
+                logger.info(f"Fund sync completed. Total new records: {total_added}")
+
+        finally:
+            await connector.close()
+
+    asyncio.run(_sync())
+
+    return {"status": "completed", "synced_symbols": len(sync_symbols or FUND_SYMBOLS)}
+
+
+@celery_app.task(name="scheduled_fund_sync")
+def scheduled_fund_sync():
+    """
+    定时同步基金数据（每日触发，A股收盘后）
+    """
+    return sync_fund_data_task()
+
+
+# ==================== 全量数据同步任务 ====================
+
+@celery_app.task(name="sync_all_data")
+def sync_all_data_task():
+    """
+    同步所有资产数据（全量同步）
+    """
+    logger.info("Starting full data sync for all asset types")
+
+    # 分别调用各类型同步任务
+    crypto_result = sync_crypto_data_task()
+    stock_result = sync_stock_data_task()
+    gold_result = sync_gold_data_task()
+    fund_result = sync_fund_data_task()
+
+    return {
+        "status": "completed",
+        "crypto": crypto_result,
+        "stock": stock_result,
+        "gold": gold_result,
+        "fund": fund_result,
+    }

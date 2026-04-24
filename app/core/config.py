@@ -5,11 +5,17 @@ from functools import lru_cache
 from typing import List, Optional, Union
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """应用配置"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",  # 忽略.env中未定义的字段
+    )
 
     # Application
     APP_NAME: str = "WealthWhisker"
@@ -38,8 +44,20 @@ class Settings(BaseSettings):
     OKX_API_SECRET: Optional[str] = None
     OKX_API_PASSPHRASE: Optional[str] = None
     OKX_API_URL: str = "https://www.okx.com"
-    ALPHA_VANTAGE_API_KEY: Optional[str] = None
+
+    # Yahoo Finance (免费，无需API密钥)
     YAHOO_FINANCE_ENABLED: bool = True
+
+    # Alpha Vantage (需要API密钥，备用)
+    ALPHA_VANTAGE_API_KEY: Optional[str] = None
+    ALPHA_VANTAGE_API_URL: str = "https://www.alphavantage.co"
+
+    # 东方财富/天天基金 (中国基金数据)
+    EASTMONEY_API_URL: str = "http://fund.eastmoney.com"
+
+    # Metals API (黄金贵金属数据)
+    METALS_API_KEY: Optional[str] = None
+    METALS_API_URL: str = "https://api.metals.live"
 
     # Data Sync
     DATA_SYNC_INTERVAL_MINUTES: int = 60
@@ -67,10 +85,6 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "DEBUG"
     LOG_FILE: str = "logs/app.log"
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 @lru_cache()

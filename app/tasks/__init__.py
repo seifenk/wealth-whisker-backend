@@ -7,6 +7,14 @@ from app.tasks.data_sync import (
     sync_crypto_tickers_task,
     scheduled_crypto_sync,
     scheduled_crypto_tickers_sync,
+    sync_stock_data_task,
+    sync_stock_tickers_task,
+    scheduled_stock_sync,
+    sync_gold_data_task,
+    scheduled_gold_sync,
+    sync_fund_data_task,
+    scheduled_fund_sync,
+    sync_all_data_task,
 )
 
 __all__ = [
@@ -15,4 +23,12 @@ __all__ = [
     "sync_crypto_tickers_task",
     "scheduled_crypto_sync",
     "scheduled_crypto_tickers_sync",
+    "sync_stock_data_task",
+    "sync_stock_tickers_task",
+    "scheduled_stock_sync",
+    "sync_gold_data_task",
+    "scheduled_gold_sync",
+    "sync_fund_data_task",
+    "scheduled_fund_sync",
+    "sync_all_data_task",
 ]

@@ -4,8 +4,8 @@
 
 | Phase | 状态 | 完成度 |
 |-------|------|--------|
-| Phase 1: 基础设施搭建 | ✅ 已完成 | 90% |
-| Phase 2: 用户认证与资产管理 | ✅ 已完成 | 90% |
+| Phase 1: 基础设施搭建 | ✅ 已完成 | 100% |
+| Phase 2: 用户认证与资产管理 | ✅ 已完成 | 100% |
 | Phase 3: 决策看板与策略回测 | ⏳ 待开始 | 0% |
 | Phase 4: 模拟交易系统 | ⏳ 待开始 | 0% |
 | Phase 5: 研究结论与模型校准 | ⏳ 待开始 | 0% |
@@ -13,7 +13,7 @@
 
 **当前阶段**：Phase 2 完成，准备进入 Phase 3
 
-**整体进度**：约 40%
+**整体进度**：约 45%
 
 ---
 
@@ -211,7 +211,7 @@ wealth-whisker-backend/
    - [x] ~~config.py (环境变量、数据库连接)~~
    - [x] ~~security.py (JWT工具)~~
    - [x] ~~exceptions.py (统一异常处理)~~
-   - [ ] middleware.py (请求日志、错误处理)
+   - [x] ~~middleware.py (请求日志、错误处理)~~ [占位文件已创建]
 
 **交付物**：
 - ✅ 可运行的Docker开发环境
@@ -238,9 +238,9 @@ wealth-whisker-backend/
    
 3. 数据源接入
    - [x] ~~加密货币数据源连接器(OKX API)~~
-   - [ ] 股票数据源连接器(Alpha Vantage/Yahoo Finance)
-   - [ ] 黄金数据源连接器
-   - [ ] 基金数据源连接器
+   - [x] ~~股票数据源连接器(Yahoo Finance)~~
+   - [x] ~~黄金数据源连接器(Yahoo Finance黄金ETF)~~
+   - [x] ~~基金数据源连接器(东方财富API)~~
    
 4. 数据同步任务
    - [x] ~~Celery数据同步任务(tasks/data_sync.py)~~
