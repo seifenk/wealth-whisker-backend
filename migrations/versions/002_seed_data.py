@@ -80,18 +80,37 @@ def upgrade() -> None:
     # Seed assets
     op.execute("""
         INSERT INTO assets (symbol, name, asset_type, exchange, currency, min_lot, tick_size, is_active, metadata) VALUES
-        ('BTC', 'Bitcoin', 'crypto', 'binance', 'USD', 0.0001, 1, true, '{"description": "比特币，市值最大的加密货币"}'),
-        ('ETH', 'Ethereum', 'crypto', 'binance', 'USD', 0.001, 0.01, true, '{"description": "以太坊，第二大加密货币，支持智能合约"}'),
-        ('GOLD', 'Gold Spot', 'gold', 'LBMA', 'USD', 0.01, 0.01, true, '{"description": "黄金现货价格"}'),
-        ('SPY', 'SPDR S&P 500 ETF', 'stock', 'NYSE', 'USD', 1, 0.01, true, '{"description": "标普500指数ETF"}'),
-        ('AAPL', 'Apple Inc.', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "苹果公司股票"}'),
-        ('QQQ', 'Invesco QQQ Trust', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "纳斯达克100指数ETF"}');
+        -- 加密货币 (OKX)
+        ('BTC', 'Bitcoin', 'crypto', 'OKX', 'USD', 0.0001, 1, true, '{"description": "比特币，市值最大的加密货币", "ds_symbol": "BTC/USDT"}'),
+        ('ETH', 'Ethereum', 'crypto', 'OKX', 'USD', 0.001, 0.01, true, '{"description": "以太坊，第二大加密货币，支持智能合约", "ds_symbol": "ETH/USDT"}'),
+        ('SOL', 'Solana', 'crypto', 'OKX', 'USD', 0.01, 0.01, true, '{"description": "Solana，高性能区块链", "ds_symbol": "SOL/USDT"}'),
+        ('XRP', 'Ripple', 'crypto', 'OKX', 'USD', 1, 0.001, true, '{"description": "瑞波币", "ds_symbol": "XRP/USDT"}'),
+        ('DOGE', 'Dogecoin', 'crypto', 'OKX', 'USD', 1, 0.001, true, '{"description": "狗狗币", "ds_symbol": "DOGE/USDT"}'),
+        -- 黄金 (Yahoo Finance)
+        ('GLD', 'SPDR Gold Shares ETF', 'gold', 'NYSE', 'USD', 1, 0.01, true, '{"description": "黄金ETF，跟踪黄金现货价格", "ds_symbol": "GLD"}'),
+        ('IAU', 'iShares Gold Trust', 'gold', 'NYSE', 'USD', 1, 0.01, true, '{"description": "黄金ETF", "ds_symbol": "IAU"}'),
+        -- 股票 (Yahoo Finance)
+        ('AAPL', 'Apple Inc.', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "苹果公司股票", "ds_symbol": "AAPL"}'),
+        ('GOOGL', 'Alphabet Inc.', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "谷歌母公司", "ds_symbol": "GOOGL"}'),
+        ('MSFT', 'Microsoft Corp.', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "微软公司", "ds_symbol": "MSFT"}'),
+        ('AMZN', 'Amazon.com Inc.', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "亚马逊", "ds_symbol": "AMZN"}'),
+        ('META', 'Meta Platforms Inc.', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "Meta/Facebook", "ds_symbol": "META"}'),
+        ('NVDA', 'NVIDIA Corp.', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "英伟达", "ds_symbol": "NVDA"}'),
+        ('TSLA', 'Tesla Inc.', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "特斯拉", "ds_symbol": "TSLA"}'),
+        ('SPY', 'SPDR S&P 500 ETF', 'stock', 'NYSE', 'USD', 1, 0.01, true, '{"description": "标普500指数ETF", "ds_symbol": "SPY"}'),
+        ('QQQ', 'Invesco QQQ Trust', 'stock', 'NASDAQ', 'USD', 1, 0.01, true, '{"description": "纳斯达克100指数ETF", "ds_symbol": "QQQ"}'),
+        -- 基金 (东方财富)
+        ('000001', '华夏成长混合', 'fund', 'EastMoney', 'CNY', 1, 0.01, true, '{"description": "华夏成长混合基金", "ds_symbol": "000001"}'),
+        ('000011', '华夏大盘精选', 'fund', 'EastMoney', 'CNY', 1, 0.01, true, '{"description": "华夏大盘精选混合", "ds_symbol": "000011"}'),
+        ('110022', '易方达消费行业', 'fund', 'EastMoney', 'CNY', 1, 0.01, true, '{"description": "易方达消费行业股票", "ds_symbol": "110022"}'),
+        ('510300', '华泰柏瑞沪深300ETF', 'fund', 'EastMoney', 'CNY', 1, 0.01, true, '{"description": "沪深300指数ETF", "ds_symbol": "510300"}'),
+        ('510050', '华夏上证50ETF', 'fund', 'EastMoney', 'CNY', 1, 0.01, true, '{"description": "上证50指数ETF", "ds_symbol": "510050"}');
     """)
 
 
 def downgrade() -> None:
     # Delete seed data
-    op.execute("DELETE FROM assets WHERE symbol IN ('BTC', 'ETH', 'GOLD', 'SPY', 'AAPL', 'QQQ');")
+    op.execute("DELETE FROM assets WHERE symbol IN ('BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'GLD', 'IAU', 'AAPL', 'GOOGL', 'MSFT', 'AMZN', 'META', 'NVDA', 'TSLA', 'SPY', 'QQQ', '000001', '000011', '110022', '510300', '510050');")
     op.execute("DELETE FROM strategy_templates WHERE code IN ('ma_cross', 'momentum', 'dca', 'risk_parity');")
     op.execute("DELETE FROM achievements;")
     op.execute("DELETE FROM disclaimer_versions WHERE version = '1.0';")

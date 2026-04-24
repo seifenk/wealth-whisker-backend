@@ -1,5 +1,9 @@
 """
 资产数据API路由
+
+支持实时数据获取：
+- 默认优先查数据库缓存
+- force_refresh=true 强制从数据源实时获取
 """
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -15,6 +19,7 @@ from app.schemas.asset import (
     AssetMetricResponse,
     AssetResponse,
     DashboardResponse,
+    DashboardItemResponse,
     OHLCVResponse,
     PerformanceMetricsResponse,
 )
@@ -37,31 +42,35 @@ async def get_assets(
     游客和登录用户均可访问
     """
     service = AssetService(db)
-    assets = await service.get_assets(
-        asset_type=asset_type,
-        limit=limit,
-        offset=offset,
-    )
-
-    return [
-        AssetResponse(
-            id=str(asset.id),
-            symbol=asset.symbol,
-            name=asset.name,
-            asset_type=asset.asset_type,
-            exchange=asset.exchange,
-            currency=asset.currency,
-            is_active=asset.is_active,
-            min_lot=asset.min_lot,
-            tick_size=asset.tick_size,
+    try:
+        assets = await service.get_assets(
+            asset_type=asset_type,
+            limit=limit,
+            offset=offset,
         )
-        for asset in assets
-    ]
+
+        return [
+            AssetResponse(
+                id=str(asset.id),
+                symbol=asset.symbol,
+                name=asset.name,
+                asset_type=asset.asset_type,
+                exchange=asset.exchange,
+                currency=asset.currency,
+                is_active=asset.is_active,
+                min_lot=asset.min_lot,
+                tick_size=asset.tick_size,
+            )
+            for asset in assets
+        ]
+    finally:
+        await service.close_connectors()
 
 
 @router.get("/dashboard", response_model=DashboardResponse)
 async def get_dashboard(
     asset_type: Optional[str] = Query(None, description="资产类型过滤"),
+    force_refresh: bool = Query(False, description="强制从数据源实时获取"),
     db = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -69,27 +78,32 @@ async def get_dashboard(
     获取多资产决策看板数据
 
     包含资产基础信息和最新指标
+
+    - force_refresh=false: 优先使用数据库缓存（默认）
+    - force_refresh=true: 强制从数据源实时获取
     """
     service = AssetService(db)
-    dashboard_data = await service.get_dashboard_data(asset_type=asset_type)
+    try:
+        dashboard_data = await service.get_dashboard_data(
+            asset_type=asset_type,
+            force_refresh=force_refresh,
+        )
 
-    from app.schemas.asset import DashboardItemResponse
+        items = [DashboardItemResponse(**data) for data in dashboard_data]
 
-    items = [
-        DashboardItemResponse(**data)
-        for data in dashboard_data
-    ]
-
-    return DashboardResponse(
-        items=items,
-        total=len(items),
-        asset_type_filter=asset_type,
-    )
+        return DashboardResponse(
+            items=items,
+            total=len(items),
+            asset_type_filter=asset_type,
+        )
+    finally:
+        await service.close_connectors()
 
 
 @router.get("/{asset_id}", response_model=AssetDetailResponse)
 async def get_asset_detail(
     asset_id: str,
+    force_refresh: bool = Query(False, description="强制实时获取指标"),
     db = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -107,41 +121,44 @@ async def get_asset_detail(
         )
 
     service = AssetService(db)
-    asset = await service.get_asset_by_id(uuid)
+    try:
+        asset = await service.get_asset_by_id(uuid)
 
-    if not asset:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="资产不存在",
+        if not asset:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="资产不存在",
+            )
+
+        metric = await service.get_latest_metric(uuid, force_refresh=force_refresh)
+
+        return AssetDetailResponse(
+            asset=AssetResponse(
+                id=str(asset.id),
+                symbol=asset.symbol,
+                name=asset.name,
+                asset_type=asset.asset_type,
+                exchange=asset.exchange,
+                currency=asset.currency,
+                is_active=asset.is_active,
+                min_lot=asset.min_lot,
+                tick_size=asset.tick_size,
+            ),
+            latest_metric=AssetMetricResponse(
+                price=metric.price if metric else None,
+                change_24h=metric.change_24h if metric else None,
+                change_7d=metric.change_7d if metric else None,
+                volatility_30d=metric.volatility_30d if metric else None,
+                sharpe_ratio=metric.sharpe_ratio if metric else None,
+                risk_level=metric.risk_level if metric else None,
+                trend_signal=metric.trend_signal if metric else None,
+                confidence_score=metric.confidence_score if metric else None,
+                calculated_at=metric.calculated_at if metric else None,
+            ) if metric else None,
+            latest_price=metric.price if metric else None,
         )
-
-    metric = await service.get_latest_metric(uuid)
-
-    return AssetDetailResponse(
-        asset=AssetResponse(
-            id=str(asset.id),
-            symbol=asset.symbol,
-            name=asset.name,
-            asset_type=asset.asset_type,
-            exchange=asset.exchange,
-            currency=asset.currency,
-            is_active=asset.is_active,
-            min_lot=asset.min_lot,
-            tick_size=asset.tick_size,
-        ),
-        latest_metric=AssetMetricResponse(
-            price=metric.price if metric else None,
-            change_24h=metric.change_24h if metric else None,
-            change_7d=metric.change_7d if metric else None,
-            volatility_30d=metric.volatility_30d if metric else None,
-            sharpe_ratio=metric.sharpe_ratio if metric else None,
-            risk_level=metric.risk_level if metric else None,
-            trend_signal=metric.trend_signal if metric else None,
-            confidence_score=metric.confidence_score if metric else None,
-            calculated_at=metric.calculated_at if metric else None,
-        ) if metric else None,
-        latest_price=metric.price if metric else None,
-    )
+    finally:
+        await service.close_connectors()
 
 
 @router.get("/{asset_id}/ohlcv", response_model=List[OHLCVResponse])
@@ -151,6 +168,7 @@ async def get_asset_ohlcv(
     start_time: Optional[datetime] = Query(None, description="开始时间"),
     end_time: Optional[datetime] = Query(None, description="结束时间"),
     limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
+    force_refresh: bool = Query(False, description="强制从数据源实时获取"),
     db = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -158,6 +176,9 @@ async def get_asset_ohlcv(
     获取资产K线数据
 
     支持不同周期和时间范围查询
+
+    - force_refresh=false: 优先使用数据库缓存（默认）
+    - force_refresh=true: 强制从数据源实时获取
     """
     try:
         uuid = UUID(asset_id)
@@ -168,48 +189,54 @@ async def get_asset_ohlcv(
         )
 
     service = AssetService(db)
+    try:
+        asset = await service.get_asset_by_id(uuid)
+        if not asset:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="资产不存在",
+            )
 
-    # 检查资产是否存在
-    asset = await service.get_asset_by_id(uuid)
-    if not asset:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="资产不存在",
+        # 默认查询最近30天
+        if not start_time and not end_time:
+            start_time = datetime.now(timezone.utc) - timedelta(days=30)
+
+        ohlcv_list = await service.get_ohlcv(
+            asset_id=uuid,
+            interval=interval,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            force_refresh=force_refresh,
         )
 
-    # 默认查询最近30天
-    if not start_time and not end_time:
-        start_time = datetime.now(timezone.utc) - timedelta(days=30)
-
-    ohlcv_list = await service.get_ohlcv(
-        asset_id=uuid,
-        interval=interval,
-        start_time=start_time,
-        end_time=end_time,
-        limit=limit,
-    )
-
-    return [
-        OHLCVResponse(
-            time=ohlcv.time,
-            open=ohlcv.open,
-            high=ohlcv.high,
-            low=ohlcv.low,
-            close=ohlcv.close,
-            volume=ohlcv.volume,
-        )
-        for ohlcv in ohlcv_list
-    ]
+        return [
+            OHLCVResponse(
+                time=ohlcv.time,
+                open=ohlcv.open,
+                high=ohlcv.high,
+                low=ohlcv.low,
+                close=ohlcv.close,
+                volume=ohlcv.volume,
+            )
+            for ohlcv in ohlcv_list
+        ]
+    finally:
+        await service.close_connectors()
 
 
 @router.get("/{asset_id}/metrics", response_model=AssetMetricResponse)
 async def get_asset_metrics(
     asset_id: str,
+    force_refresh: bool = Query(False, description="强制实时获取"),
     db = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     获取资产最新指标
+
+    - force_refresh=false: 使用缓存（1小时内有效）
+    - force_refresh=true: 强制实时获取
     """
     try:
         uuid = UUID(asset_id)
@@ -220,25 +247,28 @@ async def get_asset_metrics(
         )
 
     service = AssetService(db)
-    metric = await service.get_latest_metric(uuid)
+    try:
+        metric = await service.get_latest_metric(uuid, force_refresh=force_refresh)
 
-    if not metric:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="暂无指标数据",
+        if not metric:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="暂无指标数据，请稍后重试或使用force_refresh=true实时获取",
+            )
+
+        return AssetMetricResponse(
+            price=metric.price,
+            change_24h=metric.change_24h,
+            change_7d=metric.change_7d,
+            volatility_30d=metric.volatility_30d,
+            sharpe_ratio=metric.sharpe_ratio,
+            risk_level=metric.risk_level,
+            trend_signal=metric.trend_signal,
+            confidence_score=metric.confidence_score,
+            calculated_at=metric.calculated_at,
         )
-
-    return AssetMetricResponse(
-        price=metric.price,
-        change_24h=metric.change_24h,
-        change_7d=metric.change_7d,
-        volatility_30d=metric.volatility_30d,
-        sharpe_ratio=metric.sharpe_ratio,
-        risk_level=metric.risk_level,
-        trend_signal=metric.trend_signal,
-        confidence_score=metric.confidence_score,
-        calculated_at=metric.calculated_at,
-    )
+    finally:
+        await service.close_connectors()
 
 
 @router.get("/{asset_id}/performance", response_model=PerformanceMetricsResponse)
@@ -262,24 +292,56 @@ async def get_asset_performance(
         )
 
     service = AssetService(db)
+    try:
+        asset = await service.get_asset_by_id(uuid)
+        if not asset:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="资产不存在",
+            )
 
-    # 检查资产是否存在
-    asset = await service.get_asset_by_id(uuid)
-    if not asset:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="资产不存在",
+        metrics = await service.calculate_performance_metrics(
+            asset_id=uuid,
+            days=days,
         )
 
-    metrics = await service.calculate_performance_metrics(
-        asset_id=uuid,
-        days=days,
-    )
+        if not metrics:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="暂无足够历史数据进行计算",
+            )
 
-    if not metrics:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="暂无足够历史数据进行计算",
-        )
+        return PerformanceMetricsResponse(**metrics)
+    finally:
+        await service.close_connectors()
 
-    return PerformanceMetricsResponse(**metrics)
+
+@router.get("/realtime/{symbol}")
+async def get_realtime_price(
+    symbol: str,
+    asset_type: Optional[str] = Query(None, description="资产类型: crypto, stock, gold, fund"),
+    db = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    直接获取实时价格（无需资产ID）
+
+    适用于快速查询特定资产价格
+    """
+    service = AssetService(db)
+    try:
+        price = await service.get_realtime_price(symbol, asset_type)
+
+        if price is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"无法获取 {symbol} 的实时价格",
+            )
+
+        return {
+            "symbol": symbol,
+            "price": float(price),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    finally:
+        await service.close_connectors()
