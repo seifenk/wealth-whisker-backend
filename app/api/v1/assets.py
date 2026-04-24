@@ -70,31 +70,70 @@ async def get_assets(
 @router.get("/dashboard", response_model=DashboardResponse)
 async def get_dashboard(
     asset_type: Optional[str] = Query(None, description="资产类型过滤"),
+    risk_preference: Optional[str] = Query(None, description="风险偏好: conservative(保守), balanced(平衡), aggressive(激进)"),
+    sort_by: Optional[str] = Query(None, description="排序字段: change_24h, change_7d, sharpe_ratio, volatility, recommendation"),
     force_refresh: bool = Query(False, description="强制从数据源实时获取"),
+    limit: int = Query(20, ge=1, le=100, description="返回数量"),
     db = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     获取多资产决策看板数据
 
-    包含资产基础信息和最新指标
+    包含资产基础信息和最新指标，支持风险偏好过滤和排序
+
+    - risk_preference: 根据用户风险偏好调整推荐策略
+      - conservative: 低波动、低风险资产优先
+      - balanced: 综合考量收益与风险
+      - aggressive: 高收益趋势资产优先
+
+    - sort_by: 排序方式
+      - change_24h: 按24h涨跌幅排序
+      - change_7d: 按7天涨跌幅排序
+      - sharpe_ratio: 按夏普比率排序
+      - volatility: 按波动率排序（低波动优先）
+      - recommendation: 按综合推荐分数排序（默认）
 
     - force_refresh=false: 优先使用数据库缓存（默认）
     - force_refresh=true: 强制从数据源实时获取
     """
+    # 验证参数
+    if risk_preference and risk_preference not in ["conservative", "balanced", "aggressive"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="risk_preference必须是conservative, balanced或aggressive",
+        )
+
+    if sort_by and sort_by not in ["change_24h", "change_7d", "sharpe_ratio", "volatility", "recommendation"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="sort_by必须是change_24h, change_7d, sharpe_ratio, volatility或recommendation",
+        )
+
+    # 如果用户已登录且没有指定风险偏好，使用用户设置的风险偏好
+    if current_user and not risk_preference:
+        risk_preference = current_user.risk_preference
+
     service = AssetService(db)
     try:
-        dashboard_data = await service.get_dashboard_data(
+        dashboard_data, query_params = await service.get_dashboard_data(
             asset_type=asset_type,
             force_refresh=force_refresh,
+            risk_preference=risk_preference,
+            sort_by=sort_by,
         )
+
+        # 限制返回数量
+        dashboard_data = dashboard_data[:limit]
 
         items = [DashboardItemResponse(**data) for data in dashboard_data]
 
         return DashboardResponse(
             items=items,
             total=len(items),
-            asset_type_filter=asset_type,
+            asset_type_filter=query_params.get("asset_type_filter"),
+            risk_preference=query_params.get("risk_preference"),
+            sort_by=query_params.get("sort_by"),
         )
     finally:
         await service.close_connectors()

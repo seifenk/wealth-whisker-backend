@@ -82,6 +82,11 @@ class DashboardItemResponse(BaseModel):
     risk_level: Optional[str] = None
     trend_signal: Optional[str] = None
     confidence_score: Optional[float] = None
+    # 技术指标摘要
+    rsi_14: Optional[float] = None
+    sma_20: Optional[float] = None
+    # 排序辅助字段
+    recommendation_score: Optional[float] = None  # 推荐分数（综合评分）
     updated_at: Optional[str] = None
 
 
@@ -90,6 +95,8 @@ class DashboardResponse(BaseModel):
     items: List[DashboardItemResponse]
     total: int
     asset_type_filter: Optional[str] = None
+    risk_preference: Optional[str] = None  # 'conservative', 'balanced', 'aggressive'
+    sort_by: Optional[str] = None
 
 
 class PerformanceMetricsResponse(BaseModel):
