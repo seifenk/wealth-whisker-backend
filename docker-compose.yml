@@ -68,6 +68,10 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - DEBUG=true
+      # 代理配置（Clash端口7897）
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
+      - NO_PROXY=localhost,127.0.0.1,postgres,redis,rabbitmq
     volumes:
       - ./app:/app/app:ro
       - ./migrations:/app/migrations:ro
@@ -89,6 +93,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      # 代理配置（Clash端口7897）
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
+      - NO_PROXY=localhost,127.0.0.1,postgres,redis,rabbitmq
     volumes:
       - ./app:/app/app:ro
     depends_on:

@@ -6,11 +6,13 @@ Yahoo Finance数据连接器
 
 yfinance文档: https://github.com/ranaroussi/yfinance
 """
+import os
 import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import List, Optional
 
+import requests
 from loguru import logger
 
 from app.core.config import settings
@@ -43,6 +45,32 @@ class YahooFinanceConnector(BaseConnector):
             api_key=None,
             api_secret=None,
         )
+        # 配置requests会话使用代理
+        self._setup_proxy_session()
+
+    def _setup_proxy_session(self):
+        """配置代理会话和User-Agent"""
+        http_proxy = os.environ.get('HTTP_PROXY')
+        https_proxy = os.environ.get('HTTPS_PROXY')
+
+        # 创建requests会话
+        self._session = requests.Session()
+
+        # 设置User-Agent（Yahoo Finance需要）
+        self._session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        })
+
+        if https_proxy or http_proxy:
+            # 配置代理
+            self._session.proxies = {
+                'http': http_proxy,
+                'https': https_proxy,
+            }
+            logger.info(f"Yahoo connector using proxy: {https_proxy or http_proxy}")
+
+        # 设置yfinance使用这个会话
+        yf.Ticker.session = self._session
 
     async def get_ohlcv(self, symbol: str, interval: str = "1d",
                         start_time: Optional[datetime] = None,
@@ -118,7 +146,7 @@ class YahooFinanceConnector(BaseConnector):
         """
         获取实时行情数据
 
-        yfinance接口: Ticker.info
+        直接使用requests调用Yahoo Finance API（比yfinance更稳定）
 
         Args:
             symbol: 股票符号
@@ -127,24 +155,35 @@ class YahooFinanceConnector(BaseConnector):
             行情数据
         """
         try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
+            # 使用chart API获取价格（更稳定）
+            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d'
 
-            # yfinance的info是同步调用
-            last_price = info.get('currentPrice') or info.get('regularMarketPrice') or 0
+            resp = self._session.get(url, timeout=30)
+            resp.raise_for_status()
+
+            data = resp.json()
+            result = data.get('chart', {}).get('result', [])
+
+            if not result:
+                raise Exception(f"No data for {symbol}")
+
+            meta = result[0].get('meta', {})
+            last_price = meta.get('regularMarketPrice', 0)
 
             return TickerData(
                 symbol=symbol,
                 last_price=Decimal(str(last_price)),
-                bid_price=Decimal(str(info.get('bid', 0) or 0)),
-                ask_price=Decimal(str(info.get('ask', 0) or 0)),
-                high_24h=Decimal(str(info.get('dayHigh', 0) or info.get('regularMarketDayHigh', 0) or 0)),
-                low_24h=Decimal(str(info.get('dayLow', 0) or info.get('regularMarketDayLow', 0) or 0)),
-                volume_24h=Decimal(str(info.get('volume', 0) or info.get('regularMarketVolume', 0) or 0)),
-                change_24h=Decimal(str(info.get('regularMarketChangePercent', 0) or 0)),
+                bid_price=None,
+                ask_price=None,
+                high_24h=Decimal(str(meta.get('regularMarketDayHigh', 0) or 0)),
+                low_24h=Decimal(str(meta.get('regularMarketDayLow', 0) or 0)),
+                volume_24h=Decimal(str(meta.get('regularMarketVolume', 0) or 0)),
                 timestamp=datetime.now(timezone.utc),
             )
 
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error fetching ticker for {symbol}: {e}")
+            raise Exception(f"获取行情错误: {str(e)}")
         except Exception as e:
             logger.error(f"Error fetching ticker for {symbol}: {e}")
             raise Exception(f"获取行情错误: {str(e)}")
