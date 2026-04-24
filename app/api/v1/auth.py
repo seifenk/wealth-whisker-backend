@@ -37,6 +37,7 @@ async def register(
     user_service = UserService(db)
     user = await user_service.create(user_data)
     await db.commit()
+    await db.refresh(user)  # 刷新对象确保属性可用
     return user
 
 
@@ -100,6 +101,7 @@ async def update_user_info(
     user_service = UserService(db)
     user = await user_service.update_user(current_user.id, update_data)
     await db.commit()
+    await db.refresh(user)
     return user
 
 
@@ -142,6 +144,7 @@ async def accept_disclaimer(
     user_service = UserService(db)
     user = await user_service.accept_disclaimer(current_user.id)
     await db.commit()
+    await db.refresh(user)
     return user
 
 

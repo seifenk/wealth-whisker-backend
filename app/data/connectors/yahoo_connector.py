@@ -1,13 +1,12 @@
 """
 Yahoo Finance数据连接器
 
-使用yfinance官方库获取股票、ETF、指数数据
+使用requests直接调用Yahoo Finance API获取股票、ETF、指数数据
 支持自动数据格式化和错误处理
 
-yfinance文档: https://github.com/ranaroussi/yfinance
+Yahoo Finance API文档: https://query1.finance.yahoo.com/v8/finance/chart/
 """
 import os
-import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import List, Optional
@@ -17,19 +16,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.data.connectors.base import BaseConnector, OHLCVData, TickerData
-
-
-# yfinance K线周期映射
-YF_INTERVAL_MAP = {
-    "1m": "1m",
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1h": "60m",
-    "1d": "1d",
-    "1w": "1wk",
-    "1M": "1mo",
-}
+from app.data.constants import to_yfinance_interval, is_valid_interval
 
 
 class YahooFinanceConnector(BaseConnector):
@@ -69,9 +56,6 @@ class YahooFinanceConnector(BaseConnector):
             }
             logger.info(f"Yahoo connector using proxy: {https_proxy or http_proxy}")
 
-        # 设置yfinance使用这个会话
-        yf.Ticker.session = self._session
-
     async def get_ohlcv(self, symbol: str, interval: str = "1d",
                         start_time: Optional[datetime] = None,
                         end_time: Optional[datetime] = None,
@@ -79,7 +63,7 @@ class YahooFinanceConnector(BaseConnector):
         """
         获取K线数据
 
-        yfinance接口: Ticker.history
+        直接使用requests调用Yahoo Finance Chart API（比yfinance更稳定）
 
         Args:
             symbol: 股票/ETF符号 (如 AAPL, GLD, ^GSPC)
@@ -91,7 +75,11 @@ class YahooFinanceConnector(BaseConnector):
         Returns:
             K线数据列表 (按时间正序)
         """
-        yf_interval = YF_INTERVAL_MAP.get(interval, interval)
+        yf_interval = to_yfinance_interval(interval)
+
+        if not is_valid_interval(interval):
+            logger.warning(f"Invalid interval '{interval}', using default 1d")
+            yf_interval = '1d'
 
         # 默认时间范围
         if not start_time:
@@ -99,54 +87,88 @@ class YahooFinanceConnector(BaseConnector):
         if not end_time:
             end_time = datetime.now(timezone.utc)
 
+        # 计算时间跨度（天数）
+        days = (end_time - start_time).days + 1
+        if days <= 0:
+            days = 30
+
         try:
-            # yfinance使用同步API，在异步环境中直接调用
-            ticker = yf.Ticker(symbol)
+            # 使用Yahoo Chart API
+            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={yf_interval}&range={days}d'
 
-            # 获取历史数据
-            hist = ticker.history(
-                start=start_time.strftime('%Y-%m-%d'),
-                end=end_time.strftime('%Y-%m-%d'),
-                interval=yf_interval,
-                auto_adjust=True,  # 自动调整价格（分红、拆股）
-                prepost=False,  # 不包含盘前盘后数据
-            )
+            resp = self._session.get(url, timeout=30)
+            resp.raise_for_status()
 
-            if hist.empty:
+            data = resp.json()
+            result = data.get('chart', {}).get('result', [])
+
+            if not result:
+                logger.warning(f"No OHLCV data for {symbol}")
                 return []
 
-            result = []
-            for index, row in hist.iterrows():
-                # yfinance返回的索引是DatetimeIndex
-                if hasattr(index, 'to_pydatetime'):
-                    time = index.to_pydatetime()
-                    if time.tzinfo is None:
-                        time = time.replace(tzinfo=timezone.utc)
-                else:
-                    time = datetime.now(timezone.utc)
+            # 解析时间戳
+            timestamps = result[0].get('timestamp', [])
+            if not timestamps:
+                return []
+
+            # 解析价格数据
+            indicators = result[0].get('indicators', {})
+            quote = indicators.get('quote', [])
+
+            if not quote:
+                return []
+
+            quote_data = quote[0]
+            opens = quote_data.get('open', [])
+            highs = quote_data.get('high', [])
+            lows = quote_data.get('low', [])
+            closes = quote_data.get('close', [])
+            volumes = quote_data.get('volume', [])
+
+            ohlcv_list = []
+
+            for i in range(len(timestamps)):
+                # 跳过None值（Yahoo可能有缺失数据）
+                if opens[i] is None or closes[i] is None:
+                    continue
+
+                # Yahoo返回Unix时间戳（秒）
+                timestamp = timestamps[i]
+                time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+
+                # 过滤时间范围
+                if time < start_time or time > end_time:
+                    continue
 
                 ohlcv = OHLCVData(
                     time=time,
-                    open=Decimal(str(row['Open'])),
-                    high=Decimal(str(row['High'])),
-                    low=Decimal(str(row['Low'])),
-                    close=Decimal(str(row['Close'])),
-                    volume=Decimal(str(row['Volume'])),
+                    open=Decimal(str(opens[i] or closes[i])),
+                    high=Decimal(str(highs[i] or closes[i])),
+                    low=Decimal(str(lows[i] or closes[i])),
+                    close=Decimal(str(closes[i])),
+                    volume=Decimal(str(volumes[i] or 0)),
                 )
-                result.append(ohlcv)
+                ohlcv_list.append(ohlcv)
+
+            # 按时间正序排列
+            ohlcv_list.sort(key=lambda x: x.time)
 
             # 返回最近limit条数据
-            return result[-limit:] if len(result) > limit else result
+            return ohlcv_list[-limit:] if len(ohlcv_list) > limit else ohlcv_list
 
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error fetching OHLCV for {symbol}: {e}")
+            raise Exception(f"获取K线错误: {str(e)}")
         except Exception as e:
             logger.error(f"Error fetching OHLCV for {symbol}: {e}")
-            raise Exception(f"获取数据错误: {str(e)}")
+            raise Exception(f"获取K线错误: {str(e)}")
 
     async def get_ticker(self, symbol: str) -> TickerData:
         """
         获取实时行情数据
 
         直接使用requests调用Yahoo Finance API（比yfinance更稳定）
+        从最近2天的K线数据计算24小时涨跌幅
 
         Args:
             symbol: 股票符号
@@ -155,8 +177,9 @@ class YahooFinanceConnector(BaseConnector):
             行情数据
         """
         try:
-            # 使用chart API获取价格（更稳定）
-            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d'
+            # 使用chart API获取价格和涨跌幅（更稳定）
+            # 获取最近2天数据以计算24小时涨跌幅
+            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d'
 
             resp = self._session.get(url, timeout=30)
             resp.raise_for_status()
@@ -170,6 +193,36 @@ class YahooFinanceConnector(BaseConnector):
             meta = result[0].get('meta', {})
             last_price = meta.get('regularMarketPrice', 0)
 
+            # 计算24小时涨跌幅
+            # 从最近2天的收盘价计算
+            change_24h = None
+
+            indicators = result[0].get('indicators', {})
+            quote = indicators.get('quote', [])
+
+            if quote:
+                quote_data = quote[0]
+                closes = quote_data.get('close', [])
+
+                # 过滤掉None值
+                valid_closes = [c for c in closes if c is not None]
+
+                if len(valid_closes) >= 2:
+                    # 使用最近2个收盘价计算涨跌幅
+                    previous_close = valid_closes[-2]
+                    current_close = valid_closes[-1] if last_price == 0 else last_price
+
+                    # 计算百分比涨跌幅
+                    if previous_close > 0:
+                        change_24h = Decimal(str((current_close - previous_close) / previous_close * 100))
+                elif len(valid_closes) == 1:
+                    # 只有1个数据点，使用chartPreviousClose作为参考
+                    chart_previous_close = meta.get('chartPreviousClose', 0)
+                    current_close = valid_closes[-1] if last_price == 0 else last_price
+
+                    if chart_previous_close > 0:
+                        change_24h = Decimal(str((current_close - chart_previous_close) / chart_previous_close * 100))
+
             return TickerData(
                 symbol=symbol,
                 last_price=Decimal(str(last_price)),
@@ -178,6 +231,7 @@ class YahooFinanceConnector(BaseConnector):
                 high_24h=Decimal(str(meta.get('regularMarketDayHigh', 0) or 0)),
                 low_24h=Decimal(str(meta.get('regularMarketDayLow', 0) or 0)),
                 volume_24h=Decimal(str(meta.get('regularMarketVolume', 0) or 0)),
+                change_24h=change_24h,  # 添加24小时涨跌幅
                 timestamp=datetime.now(timezone.utc),
             )
 
@@ -192,7 +246,7 @@ class YahooFinanceConnector(BaseConnector):
         """
         获取批量行情数据
 
-        yfinance支持批量下载
+        Yahoo不支持批量API，逐个调用get_ticker
 
         Args:
             symbols: 股票符号列表
@@ -203,43 +257,16 @@ class YahooFinanceConnector(BaseConnector):
         if not symbols:
             return []
 
-        try:
-            # 使用yfinance批量下载
-            tickers = yf.Tickers(' '.join(symbols))
+        result = []
+        for symbol in symbols:
+            try:
+                ticker = await self.get_ticker(symbol)
+                result.append(ticker)
+            except Exception as e:
+                logger.warning(f"Error getting ticker for {symbol}: {e}")
+                continue
 
-            result = []
-            for symbol in symbols:
-                try:
-                    ticker_obj = tickers.tickers.get(symbol)
-                    if ticker_obj is None:
-                        continue
-
-                    info = ticker_obj.info
-                    if not info:
-                        continue
-
-                    last_price = info.get('currentPrice') or info.get('regularMarketPrice') or 0
-
-                    ticker_data = TickerData(
-                        symbol=symbol,
-                        last_price=Decimal(str(last_price)),
-                        bid_price=Decimal(str(info.get('bid', 0) or 0)),
-                        ask_price=Decimal(str(info.get('ask', 0) or 0)),
-                        high_24h=Decimal(str(info.get('dayHigh', 0) or 0)),
-                        low_24h=Decimal(str(info.get('dayLow', 0) or 0)),
-                        volume_24h=Decimal(str(info.get('volume', 0) or 0)),
-                        timestamp=datetime.now(timezone.utc),
-                    )
-                    result.append(ticker_data)
-                except Exception as e:
-                    logger.warning(f"Error getting ticker for {symbol}: {e}")
-                    continue
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error fetching tickers: {e}")
-            raise Exception(f"获取行情错误: {str(e)}")
+        return result
 
     async def get_supported_symbols(self) -> List[str]:
         """
@@ -282,9 +309,13 @@ class YahooFinanceConnector(BaseConnector):
             是否健康
         """
         try:
-            ticker = yf.Ticker("AAPL")
-            info = ticker.info
-            return bool(info)
+            # 使用requests测试连接
+            url = 'https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d'
+            resp = self._session.get(url, timeout=10)
+            resp.raise_for_status()
+
+            data = resp.json()
+            return 'chart' in data and 'result' in data['chart']
         except Exception as e:
             logger.warning(f"Health check failed: {e}")
             return False
@@ -297,9 +328,12 @@ class YahooFinanceConnector(BaseConnector):
 
     # ==================== 扩展信息接口 ====================
 
+    # 注意：以下扩展功能需要yfinance库，但核心功能已使用requests API
+    # 如果需要这些功能，请在requirements.txt中保留yfinance依赖
+
     async def get_company_info(self, symbol: str) -> dict:
         """
-        获取公司详细信息
+        获取公司详细信息（扩展功能）
 
         Args:
             symbol: 股票符号
@@ -307,20 +341,20 @@ class YahooFinanceConnector(BaseConnector):
         Returns:
             公司信息字典
         """
+        # 暂时返回基础信息，完整功能需要yfinance库
         try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
-
+            ticker = await self.get_ticker(symbol)
             return {
                 'symbol': symbol,
-                'name': info.get('longName', ''),
-                'sector': info.get('sector', ''),
-                'industry': info.get('industry', ''),
-                'market_cap': info.get('marketCap', 0),
-                'pe_ratio': info.get('trailingPE', 0),
-                'dividend_yield': info.get('dividendYield', 0),
-                'beta': info.get('beta', 0),
-                'description': info.get('longBusinessSummary', ''),
+                'name': symbol,
+                'sector': '',
+                'industry': '',
+                'market_cap': 0,
+                'pe_ratio': 0,
+                'dividend_yield': 0,
+                'beta': 0,
+                'description': '',
+                'last_price': float(ticker.last_price),
             }
         except Exception as e:
             logger.error(f"Error getting company info for {symbol}: {e}")
@@ -328,7 +362,7 @@ class YahooFinanceConnector(BaseConnector):
 
     async def get_dividends(self, symbol: str) -> List[dict]:
         """
-        获取分红历史
+        获取分红历史（扩展功能，需要yfinance）
 
         Args:
             symbol: 股票符号
@@ -336,33 +370,13 @@ class YahooFinanceConnector(BaseConnector):
         Returns:
             分红记录列表
         """
-        try:
-            ticker = yf.Ticker(symbol)
-            dividends = ticker.dividends
-
-            if dividends.empty:
-                return []
-
-            result = []
-            for index, value in dividends.items():
-                if hasattr(index, 'to_pydatetime'):
-                    time = index.to_pydatetime()
-                else:
-                    time = datetime.now(timezone.utc)
-
-                result.append({
-                    'date': time.strftime('%Y-%m-%d'),
-                    'amount': float(value),
-                })
-
-            return result
-        except Exception as e:
-            logger.error(f"Error getting dividends for {symbol}: {e}")
-            return []
+        # 暂时返回空列表，完整功能需要yfinance库
+        logger.info(f"Dividends data for {symbol} requires yfinance library")
+        return []
 
     async def get_splits(self, symbol: str) -> List[dict]:
         """
-        获取拆股历史
+        获取拆股历史（扩展功能，需要yfinance）
 
         Args:
             symbol: 股票符号
@@ -370,26 +384,6 @@ class YahooFinanceConnector(BaseConnector):
         Returns:
             拆股记录列表
         """
-        try:
-            ticker = yf.Ticker(symbol)
-            splits = ticker.splits
-
-            if splits.empty:
-                return []
-
-            result = []
-            for index, value in splits.items():
-                if hasattr(index, 'to_pydatetime'):
-                    time = index.to_pydatetime()
-                else:
-                    time = datetime.now(timezone.utc)
-
-                result.append({
-                    'date': time.strftime('%Y-%m-%d'),
-                    'ratio': float(value),
-                })
-
-            return result
-        except Exception as e:
-            logger.error(f"Error getting splits for {symbol}: {e}")
-            return []
+        # 暂时返回空列表，完整功能需要yfinance库
+        logger.info(f"Splits data for {symbol} requires yfinance library")
+        return []

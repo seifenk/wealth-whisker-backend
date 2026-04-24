@@ -17,6 +17,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.data.connectors.base import BaseConnector, OHLCVData, TickerData
+from app.data.constants import normalize_interval
 
 
 # 热门基金列表
@@ -195,9 +196,11 @@ class EastMoneyConnector(BaseConnector):
         """
         获取基金净值历史数据
 
+        注意：基金净值只有日线数据，其他interval会被标准化为1D
+
         Args:
             symbol: 基金代码
-            interval: K线周期 (基金只有日线数据)
+            interval: K线周期（基金只有日线数据，强制使用1D）
             start_time: 开始时间
             end_time: 结束时间
             limit: 返回数量限制
@@ -205,6 +208,10 @@ class EastMoneyConnector(BaseConnector):
         Returns:
             净值历史数据列表
         """
+        # 标准化interval，基金净值只有日线数据
+        normalized_interval = normalize_interval(interval)
+        if normalized_interval != '1D':
+            logger.info(f"基金数据只支持日线，将 '{interval}' 标准化为 '1D'")
         if not start_time:
             start_time = datetime.now(timezone.utc) - timedelta(days=30)
         if not end_time:

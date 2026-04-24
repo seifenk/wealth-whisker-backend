@@ -6,6 +6,7 @@ OKX加密货币数据连接器
 
 ccxt文档: https://docs.ccxt.com/
 """
+import os
 import ccxt.async_support as ccxt
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -15,20 +16,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.data.connectors.base import BaseConnector, OHLCVData, TickerData
-
-
-# ccxt K线周期映射
-CCXT_INTERVAL_MAP = {
-    "1m": "1m",
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1h": "1h",
-    "4h": "4h",
-    "1d": "1d",
-    "1w": "1w",
-    "1M": "1M",
-}
+from app.data.constants import to_ccxt_interval, is_valid_interval
 
 
 class OKXConnector(BaseConnector):
@@ -55,7 +43,11 @@ class OKXConnector(BaseConnector):
             ccxt.okx 交易所实例
         """
         if self._exchange is None:
-            self._exchange = ccxt.okx({
+            # 获取代理配置
+            http_proxy = os.environ.get('HTTP_PROXY')
+            https_proxy = os.environ.get('HTTPS_PROXY')
+
+            config = {
                 'apiKey': self.api_key,
                 'secret': self.api_secret,
                 'password': self.extra_config.get('passphrase'),
@@ -63,7 +55,17 @@ class OKXConnector(BaseConnector):
                 'options': {
                     'defaultType': 'spot',  # 默认现货交易
                 },
-            })
+            }
+
+            # 配置代理（ccxt使用proxies参数）
+            if http_proxy or https_proxy:
+                config['proxies'] = {
+                    'http': http_proxy,
+                    'https': https_proxy,
+                }
+                logger.info(f"OKX connector using proxy: {https_proxy or http_proxy}")
+
+            self._exchange = ccxt.okx(config)
 
         return self._exchange
 
@@ -87,7 +89,11 @@ class OKXConnector(BaseConnector):
             K线数据列表 (按时间正序)
         """
         exchange = await self._get_exchange()
-        timeframe = CCXT_INTERVAL_MAP.get(interval, interval)
+        timeframe = to_ccxt_interval(interval)
+
+        if not is_valid_interval(interval):
+            logger.warning(f"Invalid interval '{interval}', using default 1h")
+            timeframe = '1h'
 
         # ccxt使用毫秒时间戳
         since = None
