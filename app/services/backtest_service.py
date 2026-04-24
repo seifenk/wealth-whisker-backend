@@ -90,9 +90,20 @@ class BacktestService:
                     raise ValueError(f"资产 {asset_id} 无历史数据")
 
                 asset = await self.asset_service.get_asset_by_id(asset_id)
+                # 传递完整的OHLCV数据
                 assets_data[str(asset_id)] = {
                     "symbol": asset.symbol if asset else "unknown",
-                    "prices": [{"time": o.time, "close": o.close} for o in ohlcv_list],
+                    "prices": [
+                        {
+                            "time": o.time,
+                            "open": o.open,
+                            "high": o.high,
+                            "low": o.low,
+                            "close": o.close,
+                            "volume": o.volume,
+                        }
+                        for o in ohlcv_list
+                    ],
                 }
 
             # 执行回测
@@ -162,24 +173,11 @@ class BacktestService:
             # 均线突破：单资产
             engine = MACrossStrategy(initial_capital=initial_capital)
 
-            # 使用第一个资产的数据
+            # 使用第一个资产的数据（已包含完整OHLCV）
             first_asset = list(assets_data.values())[0]
             prices = first_asset["prices"]
 
-            # 转换为完整OHLCV格式（假设只有close）
-            full_prices = [
-                {
-                    "time": p["time"],
-                    "open": p["close"],
-                    "high": p["close"],
-                    "low": p["close"],
-                    "close": p["close"],
-                    "volume": 0,
-                }
-                for p in prices
-            ]
-
-            return engine.run(full_prices, parameters)
+            return engine.run(prices, parameters)
 
         elif template_code == "momentum":
             # 动量轮动：多资产
@@ -199,19 +197,7 @@ class BacktestService:
             first_asset = list(assets_data.values())[0]
             prices = first_asset["prices"]
 
-            full_prices = [
-                {
-                    "time": p["time"],
-                    "open": p["close"],
-                    "high": p["close"],
-                    "low": p["close"],
-                    "close": p["close"],
-                    "volume": 0,
-                }
-                for p in prices
-            ]
-
-            return engine.run(full_prices, parameters)
+            return engine.run(prices, parameters)
 
         elif template_code == "risk_parity":
             # 风险平价：多资产
