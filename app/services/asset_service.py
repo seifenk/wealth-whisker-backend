@@ -46,10 +46,12 @@ SYMBOL_MAP = {
     "NIO": "NIO",
     "SPY": "SPY",
     "QQQ": "QQQ",
-    # 黄金
-    "GLD": "GLD",
-    "IAU": "IAU",
-    "GOLD_FUT": "GC=F",
+    # 黄金（GC=F是黄金期货，价格接近现货）
+    "XAU": "GC=F",  # 黄金现货（用期货代替）
+    "GOLD": "GC=F", # 黄金现货
+    "GLD": "GLD",   # 黄金ETF（约1/10盎司）
+    "IAU": "IAU",   # 黄金ETF
+    "GOLD_FUT": "GC=F", # 黄金期货
     # 基金 (东方财富代码)
     "000001": "000001",
     "000011": "000011",
