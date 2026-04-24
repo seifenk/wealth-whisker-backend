@@ -54,6 +54,7 @@ class Settings(BaseSettings):
 
     # 东方财富/天天基金 (中国基金数据)
     EASTMONEY_API_URL: str = "http://fund.eastmoney.com"
+    EASTMONEY_ENABLED: bool = True
 
     # Metals API (黄金贵金属数据)
     METALS_API_KEY: Optional[str] = None

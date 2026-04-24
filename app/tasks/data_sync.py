@@ -2,6 +2,7 @@
 数据同步任务模块
 
 负责从各数据源同步资产数据到数据库
+使用官方SDK：ccxt (OKX)、yfinance (Yahoo Finance)
 """
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -14,20 +15,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_app import celery_app
 from app.core.database import async_session_maker
-from app.data.connectors.okx_connector import OKXConnector
-from app.data.connectors.yahoo_connector import YahooFinanceConnector
-from app.data.connectors.gold_connector import GoldConnector
-from app.data.connectors.eastmoney_connector import EastMoneyConnector
+from app.data.connectors import OKXConnector, YahooFinanceConnector, GoldConnector, EastMoneyConnector
 from app.models.asset import Asset, OHLCV, AssetMetric
 
 
-# 加密货币交易对配置
+# 加密货币交易对配置 (ccxt格式: BTC/USDT)
 CRYPTO_SYMBOLS = [
-    ("BTC-USDT", "BTC", "Bitcoin", "crypto"),
-    ("ETH-USDT", "ETH", "Ethereum", "crypto"),
-    ("SOL-USDT", "SOL", "Solana", "crypto"),
-    ("XRP-USDT", "XRP", "Ripple", "crypto"),
-    ("DOGE-USDT", "DOGE", "Dogecoin", "crypto"),
+    ("BTC/USDT", "BTC", "Bitcoin", "crypto"),
+    ("ETH/USDT", "ETH", "Ethereum", "crypto"),
+    ("SOL/USDT", "SOL", "Solana", "crypto"),
+    ("XRP/USDT", "XRP", "Ripple", "crypto"),
+    ("DOGE/USDT", "DOGE", "Dogecoin", "crypto"),
 ]
 
 # 股票配置 (Yahoo Finance符号)
@@ -300,8 +298,8 @@ def sync_crypto_tickers_task(self):
                 assets = result.scalars().all()
 
                 for asset in assets:
-                    # 构建OKX交易对符号
-                    inst_id = f"{asset.symbol}-USDT"
+                    # 构建ccxt格式交易对符号
+                    inst_id = f"{asset.symbol}/USDT"
 
                     try:
                         ticker = await connector.get_ticker(inst_id)

@@ -32,6 +32,10 @@ scikit-learn==1.4.0
 httpx==0.26.0
 aiohttp==3.9.1
 
+# Data source SDKs (for real trading support)
+ccxt==4.2.25  # 统一加密货币交易所接口，支持OKX等多家交易所
+yfinance==0.2.36  # Yahoo Finance官方库，支持股票/ETF数据
+
 # Utilities
 python-dotenv==1.0.0
 loguru==0.7.2

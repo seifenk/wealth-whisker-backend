@@ -432,8 +432,10 @@ wealth-whisker-backend/
 - `app/tasks/metrics_calculation.py` - 指标计算任务
 
 ### 数据处理
-- `app/data/connectors/okx_connector.py` - OKX API连接器
-- `app/data/connectors/stock_connector.py` - 股票数据连接器
+- `app/data/connectors/okx_connector.py` - OKX API连接器 (使用ccxt统一接口)
+- `app/data/connectors/yahoo_connector.py` - Yahoo Finance连接器 (使用yfinance库)
+- `app/data/connectors/gold_connector.py` - 黄金数据连接器
+- `app/data/connectors/eastmoney_connector.py` - 东方财富基金连接器
 - `app/data/calculators/indicator_calculator.py` - 指标计算器(均线、RSI、波动率)
 - `app/data/calculators/backtest_engine.py` - 回测引擎核心逻辑
 

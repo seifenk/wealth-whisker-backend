@@ -1,11 +1,14 @@
 """
 黄金数据连接器
 
-使用Yahoo Finance获取黄金ETF和期货数据
+继承YahooFinanceConnector，使用yfinance获取黄金ETF和期货数据
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import List, Optional
+
+import yfinance as yf
+from loguru import logger
 
 from app.data.connectors.yahoo_connector import YahooFinanceConnector
 from app.data.connectors.base import OHLCVData, TickerData
@@ -13,10 +16,10 @@ from app.data.connectors.base import OHLCVData, TickerData
 
 # 黄金相关资产符号
 GOLD_SYMBOLS = [
-    ("GLD", "SPDR Gold Shares ETF", "gold_etf"),
-    ("IAU", "iShares Gold Trust ETF", "gold_etf"),
-    ("GC=F", "Gold Futures", "gold_futures"),
-    ("XAUUSD=X", "Gold/USD Exchange Rate", "gold_spot"),
+    ("GLD", "GLD", "SPDR Gold Shares ETF", "gold", "NYSE"),
+    ("IAU", "IAU", "iShares Gold Trust ETF", "gold", "NYSE"),
+    ("GC=F", "GOLD_FUT", "Gold Futures", "gold", "COMEX"),
+    ("XAUUSD=X", "XAU_USD", "Gold/USD Spot Rate", "gold", "Forex"),
 ]
 
 
@@ -25,6 +28,7 @@ class GoldConnector(YahooFinanceConnector):
     黄金数据连接器
 
     通过Yahoo Finance获取黄金ETF、期货、现货价格数据
+    使用yfinance库统一处理
     """
 
     async def get_gold_price(self, symbol: str = "GLD") -> TickerData:
@@ -95,3 +99,33 @@ class GoldConnector(YahooFinanceConnector):
             return True
         except Exception:
             return False
+
+    # ==================== 黄金特有功能 ====================
+
+    async def get_gold_spot_price(self) -> TickerData:
+        """
+        获取黄金现货价格（XAU/USD）
+
+        Returns:
+            黄金现货行情
+        """
+        return await self.get_ticker("XAUUSD=X")
+
+    async def compare_gold_assets(self) -> dict:
+        """
+        比较不同黄金资产的表现
+
+        Returns:
+            各黄金资产对比数据
+        """
+        symbols = ["GLD", "IAU", "GC=F"]
+        tickers = await self.get_tickers(symbols)
+
+        comparison = {}
+        for ticker in tickers:
+            comparison[ticker.symbol] = {
+                'price': float(ticker.last_price),
+                'change_24h': float(ticker.change_24h or 0),
+            }
+
+        return comparison

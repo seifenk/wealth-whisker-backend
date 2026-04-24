@@ -3,16 +3,33 @@
 
 用于获取中国公募基金数据
 通过东方财富网API获取基金净值、收益率等信息
+
+注意：东方财富无官方Python SDK，使用HTTP请求获取数据
 """
 import re
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import List, Optional
 
 import httpx
+from loguru import logger
 
 from app.core.config import settings
 from app.data.connectors.base import BaseConnector, OHLCVData, TickerData
+
+
+# 热门基金列表
+FUND_SYMBOLS = [
+    ("000001", "000001", "华夏成长混合", "fund", "EastMoney"),
+    ("000011", "000011", "华夏大盘精选", "fund", "EastMoney"),
+    ("110022", "110022", "易方达消费行业", "fund", "EastMoney"),
+    ("161725", "161725", "招商中证白酒", "fund", "EastMoney"),
+    ("519674", "519674", "银河创新成长", "fund", "EastMoney"),
+    ("510300", "510300", "华泰柏瑞沪深300ETF", "fund", "EastMoney"),
+    ("510050", "510050", "华夏上证50ETF", "fund", "EastMoney"),
+    ("159915", "159915", "易方达深证100ETF", "fund", "EastMoney"),
+]
 
 
 class EastMoneyConnector(BaseConnector):
@@ -20,6 +37,7 @@ class EastMoneyConnector(BaseConnector):
     东方财富基金数据连接器
 
     获取中国公募基金净值数据
+    使用HTTP请求（无官方SDK）
     """
 
     def __init__(self):
@@ -29,6 +47,8 @@ class EastMoneyConnector(BaseConnector):
             api_secret=None,
         )
         self._client: Optional[httpx.AsyncClient] = None
+        # 东方财富API的实际接口地址
+        self._api_base = "http://fundgz.eastmoney.com"
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取HTTP客户端"""
@@ -42,31 +62,65 @@ class EastMoneyConnector(BaseConnector):
             )
         return self._client
 
-    async def _request(self, url: str) -> dict:
+    async def _request_jsonp(self, url: str) -> dict:
         """
-        发送API请求
+        发送API请求并解析JSONP响应
+
+        东方财富返回JSONP格式: jsonpgz({"datas": {...}})
 
         Args:
             url: 完整URL
 
         Returns:
-            API响应数据
+            解析后的JSON数据
         """
         client = await self._get_client()
 
         try:
             response = await client.get(url)
             response.raise_for_status()
-            # 尝试解析JSON
+            text = response.text
+
+            # 解析JSONP格式
+            match = re.search(r'jsonpgz\((.*?)\)', text)
+            if match:
+                return json.loads(match.group(1))
+
+            # 尝试直接解析JSON
             try:
-                return response.json()
+                return json.loads(text)
             except:
-                # 如果不是JSON，返回原始文本
-                return {"raw_text": response.text}
+                return {}
+
         except httpx.HTTPStatusError as e:
-            raise Exception(f"HTTP error: {e.response.status_code}")
+            logger.error(f"HTTP error: {e.response.status_code}")
+            raise Exception(f"HTTP错误: {e.response.status_code}")
         except httpx.RequestError as e:
-            raise Exception(f"Request error: {str(e)}")
+            logger.error(f"Request error: {str(e)}")
+            raise Exception(f"请求错误: {str(e)}")
+
+    async def _request_html(self, url: str) -> str:
+        """
+        发送API请求获取HTML内容
+
+        Args:
+            url: 完整URL
+
+        Returns:
+            HTML文本
+        """
+        client = await self._get_client()
+
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.text
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error: {e.response.status_code}")
+            raise Exception(f"HTTP错误: {e.response.status_code}")
+        except httpx.RequestError as e:
+            logger.error(f"Request error: {str(e)}")
+            raise Exception(f"请求错误: {str(e)}")
 
     async def get_fund_info(self, fund_code: str) -> dict:
         """
@@ -78,18 +132,19 @@ class EastMoneyConnector(BaseConnector):
         Returns:
             基金信息字典
         """
-        url = f"http://fundgz.eastmoney.com/fundgz/{fund_code}.json"
-        data = await self._request(url)
+        url = f"{self._api_base}/fundgz/{fund_code}.json"
+        data = await self._request_jsonp(url)
 
-        if "raw_text" in data:
-            # 东方财富返回jsonp格式: jsonpgz({"datas": {...}})
-            text = data["raw_text"]
-            match = re.search(r'jsonpgz\((.*?)\)', text)
-            if match:
-                import json
-                return json.loads(match.group(1))
+        # 东方财富返回的字段说明:
+        # fundcode: 基金代码
+        # name: 基金名称
+        # jzrqv: 净值日期
+        # dwjz: 单位净值
+        # gsz: 估算净值
+        # gszzl: 估算涨幅
+        # gztime: 估算时间
 
-        return data.get("datas", {})
+        return data.get("datas", data)
 
     async def get_fund_net_value(self, fund_code: str) -> TickerData:
         """
@@ -104,28 +159,18 @@ class EastMoneyConnector(BaseConnector):
         info = await self.get_fund_info(fund_code)
 
         if not info:
-            raise Exception(f"No fund data for {fund_code}")
-
-        # 东方财富返回的字段
-        # fundcode: 基金代码
-        # name: 基金名称
-        # jzrqv: 净值日期
-        # dwjz: 单位净值
-        # gsz: 估算净值
-        # gszzl: 估算涨幅
-        # gztime: 估算时间
+            raise Exception(f"未找到基金数据: {fund_code}")
 
         net_value = Decimal(str(info.get("dwjz", 0) or 0))
         estimated_value = Decimal(str(info.get("gsz", 0) or 0))
         change_percent = Decimal(str(info.get("gszzl", 0) or 0))
 
-        # 使用估算净值作为当前价格（如果在交易时间内）
+        # 使用估算净值作为当前价格（交易时间内）
         last_price = estimated_value if estimated_value > 0 else net_value
 
         # 解析时间
         gz_time = info.get("gztime", "")
         try:
-            # 格式: "2024-01-15 15:00"
             timestamp = datetime.strptime(gz_time, "%Y-%m-%d %H:%M")
             timestamp = timestamp.replace(tzinfo=timezone.utc)
         except:
@@ -150,8 +195,6 @@ class EastMoneyConnector(BaseConnector):
         """
         获取基金净值历史数据
 
-        东方财富API获取基金净值历史
-
         Args:
             symbol: 基金代码
             interval: K线周期 (基金只有日线数据)
@@ -162,31 +205,23 @@ class EastMoneyConnector(BaseConnector):
         Returns:
             净值历史数据列表
         """
-        # 基金净值历史API
-        # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={code}&page=1&sdate={start}&edate={end}&per=20
-
         if not start_time:
-            start_time = datetime.now(timezone.utc) - __import__('datetime').timedelta(days=30)
+            start_time = datetime.now(timezone.utc) - timedelta(days=30)
         if not end_time:
             end_time = datetime.now(timezone.utc)
 
         start_str = start_time.strftime("%Y-%m-%d")
         end_str = end_time.strftime("%Y-%m-%d")
 
+        # 东方财富净值历史API
         url = f"http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={symbol}&page=1&sdate={start_str}&edate={end_str}&per={limit}"
 
-        data = await self._request(url)
+        html = await self._request_html(url)
 
-        if "raw_text" not in data:
-            return []
-
-        # 解析HTML表格数据
-        text = data["raw_text"]
         ohlcv_list = []
 
-        # 提取净值记录表格行
-        # 格式: <td>2024-01-15</td><td class='tor bold'>1.2345</td><td class='tor bold red'>2.15%</td>...
-        rows = re.findall(r'<tr>(.*?)</tr>', text, re.DOTALL)
+        # 解析HTML表格
+        rows = re.findall(r'<tr>(.*?)</tr>', html, re.DOTALL)
 
         for row in rows:
             try:
@@ -203,7 +238,7 @@ class EastMoneyConnector(BaseConnector):
                     continue
                 net_value = Decimal(value_match.group(1))
 
-                # 基金净值没有open/high/low/volume，都用净值表示
+                # 基金净值只有收盘价，没有开高低量
                 ohlcv = OHLCVData(
                     time=time,
                     open=net_value,
@@ -243,14 +278,15 @@ class EastMoneyConnector(BaseConnector):
             基金行情数据列表
         """
         if not symbols:
-            symbols = await self.get_supported_symbols()
+            symbols = [s[0] for s in FUND_SYMBOLS]
 
         tickers = []
         for code in symbols:
             try:
                 ticker = await self.get_fund_net_value(code)
                 tickers.append(ticker)
-            except Exception:
+            except Exception as e:
+                logger.warning(f"获取基金 {code} 失败: {e}")
                 continue
 
         return tickers
@@ -259,24 +295,10 @@ class EastMoneyConnector(BaseConnector):
         """
         获取支持的基金代码列表
 
-        返回热门基金代码
-
         Returns:
             基金代码列表
         """
-        # 热门基金列表
-        return [
-            "000001",  # 华夏成长混合
-            "000011",  # 华夏大盘精选混合
-            "110022",  # 易方达消费行业股票
-            "161725",  # 招商中证白酒指数
-            "519674",  # 银河创新成长混合
-            "000300",  # 华夏沪深300ETF联接
-            "510300",  # 华泰柏瑞沪深300ETF
-            "510050",  # 华夏上证50ETF
-            "159915",  # 易方达深证100ETF
-            "040040",  # 华安黄金易ETF联接
-        ]
+        return [s[0] for s in FUND_SYMBOLS]
 
     async def health_check(self) -> bool:
         """
@@ -295,3 +317,48 @@ class EastMoneyConnector(BaseConnector):
         """关闭HTTP客户端"""
         if self._client and not self._client.is_closed:
             await self._client.aclose()
+            self._client = None
+
+    # ==================== 基金特有功能 ====================
+
+    async def get_fund_detail(self, fund_code: str) -> dict:
+        """
+        获取基金详细信息
+
+        Args:
+            fund_code: 基金代码
+
+        Returns:
+            基金详细信息
+        """
+        info = await self.get_fund_info(fund_code)
+
+        return {
+            'code': fund_code,
+            'name': info.get('name', ''),
+            'type': '混合型' if '混合' in info.get('name', '') else '股票型',
+            'net_value': float(info.get('dwjz', 0) or 0),
+            'estimated_value': float(info.get('gsz', 0) or 0),
+            'change_percent': float(info.get('gszzl', 0) or 0),
+            'update_time': info.get('gztime', ''),
+        }
+
+    async def search_fund(self, keyword: str) -> List[dict]:
+        """
+        搜索基金（预留接口）
+
+        Args:
+            keyword: 搜索关键词
+
+        Returns:
+            匹配的基金列表
+        """
+        # 东方财富搜索API需要复杂实现，这里返回预定义列表中匹配的基金
+        results = []
+        for code, _, name, _, _ in FUND_SYMBOLS:
+            if keyword.lower() in name.lower() or keyword in code:
+                results.append({
+                    'code': code,
+                    'name': name,
+                })
+        return results
