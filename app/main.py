@@ -35,8 +35,35 @@ def create_application() -> FastAPI:
     """创建 FastAPI 应用 - 使用统一响应格式"""
 
     app = FastAPI(
-        title=settings.APP_NAME,
-        description="财智猫理财平台后端 API - 多资产理财决策与咨询平台",
+        title="财智猫(WealthWhisker) API",
+        description="""
+## 财智猫理财平台 API 文档
+
+多资产理财决策与咨询平台，让用户在同一个平台比较资产、验证策略、低风险试错。
+
+### 核心功能模块
+
+| 模块 | 说明 |
+|------|------|
+| **认证** | 用户注册、登录、JWT认证 |
+| **资产数据** | 多资产看板、K线数据、指标计算 |
+| **策略管理** | 策略模板、用户策略配置 |
+| **回测服务** | 策略回测执行、结果分析 |
+| **模拟交易** | 模拟账户、订单交易、持仓管理、绩效分析 |
+| **研究结论** | 研究卡片、模型预测、动态校准、免责声明 |
+
+### 统一响应格式
+
+所有API返回统一格式：`{"code": 0, "msg": "success", "data": {...}}`
+
+- `code`: 0表示成功，其他表示错误
+- `msg`: 描述信息
+- `data`: 返回数据
+
+### 认证方式
+
+使用JWT Bearer认证，在请求头添加：`Authorization: Bearer <token>`
+""",
         version=settings.APP_VERSION,
         docs_url="/docs",
         redoc_url="/redoc",

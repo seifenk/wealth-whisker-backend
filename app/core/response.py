@@ -1,9 +1,10 @@
 """
 统一响应格式处理
 """
-from typing import Any, Optional
+from typing import Any, Optional, Generic, TypeVar
 
 import json
+from pydantic import BaseModel
 from starlette.responses import Response, JSONResponse
 
 
@@ -17,6 +18,20 @@ class ResponseCode:
     NOT_FOUND = 404
     CONFLICT = 409
     INTERNAL_ERROR = 500
+
+
+# 定义泛型类型变量
+T = TypeVar('T')
+
+
+class UnifiedResponse(BaseModel, Generic[T]):
+    """统一响应格式模型"""
+    code: int = ResponseCode.SUCCESS
+    msg: str = "成功"
+    data: Optional[T] = None
+
+    class Config:
+        from_attributes = True
 
 
 class ResponseWrapper:

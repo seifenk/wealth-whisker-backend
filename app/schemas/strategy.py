@@ -4,6 +4,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -20,7 +21,7 @@ class StrategyTemplateBase(BaseModel):
 
 class StrategyTemplateResponse(StrategyTemplateBase):
     """策略模板响应"""
-    id: str
+    id: UUID
     parameters: Dict[str, Any]  # 参数定义 schema
     is_public: bool
 
@@ -51,8 +52,8 @@ class UserStrategyUpdate(BaseModel):
 
 class UserStrategyResponse(BaseModel):
     """用户策略响应"""
-    id: str
-    template_id: str
+    id: UUID
+    template_id: UUID
     template_code: Optional[str] = None
     template_name: Optional[str] = None
     name: str
@@ -84,8 +85,8 @@ class BacktestJobCreate(BaseModel):
 
 class BacktestJobResponse(BaseModel):
     """回测任务响应"""
-    id: str
-    strategy_id: str
+    id: UUID
+    strategy_id: UUID
     strategy_name: Optional[str] = None
     status: str  # pending, running, completed, failed
     config: Dict[str, Any]

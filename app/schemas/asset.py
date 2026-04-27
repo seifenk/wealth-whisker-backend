@@ -4,6 +4,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -19,7 +20,7 @@ class AssetBase(BaseModel):
 
 class AssetResponse(BaseModel):
     """资产响应"""
-    id: str
+    id: UUID
     symbol: str
     name: str
     asset_type: str
@@ -68,7 +69,7 @@ class AssetDetailResponse(BaseModel):
 
 class DashboardItemResponse(BaseModel):
     """看板单项响应"""
-    id: str
+    id: UUID
     symbol: str
     name: str
     asset_type: str

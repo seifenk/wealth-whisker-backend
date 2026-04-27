@@ -167,22 +167,27 @@ class AssetService:
         interval: str = "1h",
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
-        limit: int = 100,
+        limit: int = 300,
         force_refresh: bool = False,
     ) -> List[OHLCV]:
         """
         获取K线数据
 
+        分页逻辑：
+        - 不传时间参数：返回最近 limit 条数据
+        - 只传 end_time：从 end_time 往前获取 limit 条（分页加载）
+        - 传 start_time/end_time：获取时间范围内的数据
+
         Args:
             asset_id: 资产ID
-            interval: K线周期（OKX格式：小写m=分钟，大写H/D/W/M=小时/天/周/月）
-            start_time: 开始时间
-            end_time: 结束时间
-            limit: 返回数量限制
+            interval: K线周期
+            start_time: 开始时间（可选）
+            end_time: 结束时间（可选，用于分页）
+            limit: 返回数量限制（默认300）
             force_refresh: 是否强制从数据源刷新
 
         Returns:
-            K线数据列表
+            K线数据列表（时间正序：从旧到新）
         """
         # 标准化interval为OKX格式
         interval = normalize_interval(interval)
@@ -191,7 +196,8 @@ class AssetService:
         if not is_valid_interval(interval):
             logger.warning(f"Invalid interval '{interval}', using default 1H")
             interval = "1H"
-        # 1. 先查数据库
+
+        # 1. 先查数据库缓存（除非强制刷新）
         if not force_refresh:
             query = select(OHLCV).where(
                 and_(
@@ -200,20 +206,31 @@ class AssetService:
                 )
             )
 
-            if start_time:
+            # 分页查询：从 end_time 往前获取旧数据
+            if end_time and not start_time:
+                query = query.where(OHLCV.time < end_time)
+                query = query.order_by(desc(OHLCV.time)).limit(limit)
+            # 时间范围查询
+            elif start_time and end_time:
                 query = query.where(OHLCV.time >= start_time)
-            if end_time:
                 query = query.where(OHLCV.time <= end_time)
+                query = query.order_by(desc(OHLCV.time))
+                if limit:
+                    query = query.limit(limit)
+            # 首次加载：获取最近 limit 条
+            else:
+                query = query.order_by(desc(OHLCV.time)).limit(limit)
 
-            query = query.order_by(desc(OHLCV.time)).limit(limit)
             result = await self.session.execute(query)
             ohlcv_list = list(result.scalars().all())
 
+            # 如果缓存数据足够，返回（反转成正序）
             if ohlcv_list:
                 ohlcv_list.reverse()
+                logger.info(f"OHLCV from cache: {len(ohlcv_list)} candles")
                 return ohlcv_list
 
-        # 2. 数据库无数据，实时获取
+        # 2. 数据库缓存不足，从数据源获取
         asset = await self.get_asset_by_id(asset_id)
         if not asset:
             return []
@@ -226,6 +243,9 @@ class AssetService:
             # 获取数据源符号
             ds_symbol = SYMBOL_MAP.get(asset.symbol, asset.symbol)
 
+            logger.info(f"OHLCV from API: symbol={ds_symbol}, interval={interval}, "
+                       f"start={start_time}, end={end_time}, limit={limit}")
+
             ohlcv_data = await connector.get_ohlcv(
                 symbol=ds_symbol,
                 interval=interval,
@@ -234,7 +254,7 @@ class AssetService:
                 limit=limit,
             )
 
-            # 3. 入库缓存（可选）
+            # 3. 入库缓存
             for ohlcv in ohlcv_data:
                 existing = await self.session.execute(
                     select(OHLCV).where(
@@ -257,6 +277,9 @@ class AssetService:
                         volume=ohlcv.volume,
                     )
                     self.session.add(new_ohlcv)
+
+            # 提交入库
+            await self.session.commit()
 
             return ohlcv_data
 
@@ -771,3 +794,88 @@ class AssetService:
         except Exception as e:
             logger.error(f"获取实时价格失败 {symbol}: {e}")
             return None
+
+
+# ============ 静态辅助方法（供其他服务调用） ============
+
+async def get_latest_price(db: AsyncSession, asset_id: UUID) -> Optional[Decimal]:
+    """
+    获取资产最新价格（静态方法，供其他服务调用）
+
+    Args:
+        db: 数据库会话
+        asset_id: 资产ID
+
+    Returns:
+        最新价格
+    """
+    # 1. 从最新指标获取
+    result = await db.execute(
+        select(AssetMetric)
+        .where(AssetMetric.asset_id == asset_id)
+        .order_by(desc(AssetMetric.calculated_at))
+        .limit(1)
+    )
+    metric = result.scalar_one_or_none()
+
+    if metric and metric.price:
+        return metric.price
+
+    # 2. 从最新K线获取
+    result = await db.execute(
+        select(OHLCV)
+        .where(and_(OHLCV.asset_id == asset_id, OHLCV.interval == "1H"))
+        .order_by(desc(OHLCV.time))
+        .limit(1)
+    )
+    ohlcv = result.scalar_one_or_none()
+
+    if ohlcv:
+        return ohlcv.close
+
+    return None
+
+
+async def get_ohlcv_static(
+    db: AsyncSession,
+    asset_id: UUID,
+    interval: str = "1h",
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+    limit: int = 100
+) -> List[OHLCV]:
+    """
+    获取K线数据（静态方法，供其他服务调用）
+
+    Args:
+        db: 数据库会话
+        asset_id: 资产ID
+        interval: K线周期
+        start_time: 开始时间
+        end_time: 结束时间
+        limit: 返回数量限制
+
+    Returns:
+        K线数据列表
+    """
+    interval = normalize_interval(interval)
+
+    query = select(OHLCV).where(
+        and_(
+            OHLCV.asset_id == asset_id,
+            OHLCV.interval == interval,
+        )
+    )
+
+    if start_time:
+        query = query.where(OHLCV.time >= start_time)
+    if end_time:
+        query = query.where(OHLCV.time <= end_time)
+
+    query = query.order_by(desc(OHLCV.time)).limit(limit)
+    result = await db.execute(query)
+    ohlcv_list = list(result.scalars().all())
+
+    # 反转顺序（时间从早到晚）
+    ohlcv_list.reverse()
+    return ohlcv_list
