@@ -130,6 +130,20 @@ class BacktestService:
                 initial_capital,
             )
 
+            # 处理结果中的datetime对象（JSONB需要字符串）
+            def serialize_datetime(obj):
+                """将datetime转换为ISO字符串"""
+                if isinstance(obj, dict):
+                    return {k: serialize_datetime(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [serialize_datetime(item) for item in obj]
+                elif isinstance(obj, datetime):
+                    return obj.isoformat()
+                return obj
+
+            # 序列化结果数据用于JSON存储
+            serializable_result = serialize_datetime(result_data)
+
             # 保存结果
             result = BacktestResult(
                 job_id=job_id,
@@ -142,16 +156,16 @@ class BacktestService:
                 total_trades=result_data.get("total_trades", 0),
                 profit_trades=result_data.get("profit_trades", 0),
                 loss_trades=result_data.get("loss_trades", 0),
-                equity_curve=result_data.get("equity_curve"),
-                trades=result_data.get("trades"),
-                metrics=result_data,
+                equity_curve=serializable_result.get("equity_curve"),
+                trades=serializable_result.get("trades"),
+                metrics=serializable_result,
             )
             self.session.add(result)
 
             # 更新任务状态
             job.status = "completed"
             job.completed_at = datetime.now(timezone.utc)
-            job.result = result_data
+            job.result = serializable_result
 
             await self.session.flush()
             logger.info(f"回测完成: {job_id}")
