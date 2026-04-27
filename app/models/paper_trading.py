@@ -35,7 +35,7 @@ class PaperAccount(Base, TimestampMixin):
     snapshots = relationship("AccountSnapshot", back_populates="account")
 
 
-class Position(Base, TimestampMixin):
+class Position(Base):
     """持仓表"""
 
     __tablename__ = "positions"
@@ -51,6 +51,7 @@ class Position(Base, TimestampMixin):
     unrealized_pnl = Column(Numeric(20, 8), nullable=True, comment='未实现盈亏')
     unrealized_pnl_pct = Column(Numeric(10, 4), nullable=True, comment='未实现盈亏比例(%)')
     opened_at = Column(DateTime(timezone=True), server_default=func.now(), comment='开仓时间')
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
     # 关系
     account = relationship("PaperAccount", back_populates="positions")
