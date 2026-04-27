@@ -26,11 +26,11 @@ async_session_maker = sessionmaker(
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """获取数据库会话"""
+    """获取数据库会话（自动commit）"""
     async with async_session_maker() as session:
         try:
             yield session
+            await session.commit()  # 成功完成后自动commit
         except Exception:
             await session.rollback()
             raise
-        # session.close() 由 async with 自动处理
