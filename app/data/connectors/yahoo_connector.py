@@ -59,21 +59,24 @@ class YahooFinanceConnector(BaseConnector):
     async def get_ohlcv(self, symbol: str, interval: str = "1d",
                         start_time: Optional[datetime] = None,
                         end_time: Optional[datetime] = None,
-                        limit: int = 100) -> List[OHLCVData]:
+                        limit: int = 300) -> List[OHLCVData]:
         """
         获取K线数据
 
-        直接使用requests调用Yahoo Finance Chart API（比yfinance更稳定）
+        分页逻辑：
+        - 不传时间参数：返回最近 limit 条数据
+        - 只传 end_time：从 end_time 往前获取 limit 条（分页加载）
+        - 传 start_time/end_time：获取时间范围内的数据
 
         Args:
-            symbol: 股票/ETF符号 (如 AAPL, GLD, ^GSPC)
+            symbol: 股票/ETF符号 (如 AAPL, GLD)
             interval: K线周期
-            start_time: 开始时间
-            end_time: 结束时间
-            limit: 返回数量限制
+            start_time: 开始时间（可选）
+            end_time: 结束时间（可选，用于分页）
+            limit: 返回数量限制（默认300）
 
         Returns:
-            K线数据列表 (按时间正序)
+            K线数据列表 (按时间正序：从旧到新)
         """
         yf_interval = to_yfinance_interval(interval)
 
@@ -81,20 +84,77 @@ class YahooFinanceConnector(BaseConnector):
             logger.warning(f"Invalid interval '{interval}', using default 1d")
             yf_interval = '1d'
 
-        # 默认时间范围
-        if not start_time:
-            start_time = datetime.now(timezone.utc) - timedelta(days=30)
-        if not end_time:
-            end_time = datetime.now(timezone.utc)
-
-        # 计算时间跨度（天数）
-        days = (end_time - start_time).days + 1
-        if days <= 0:
-            days = 30
+        # Yahoo API 使用 period1/period2 时间戳参数
+        # period1: 开始时间戳（秒）
+        # period2: 结束时间戳（秒）
 
         try:
-            # 使用Yahoo Chart API
-            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={yf_interval}&range={days}d'
+            # 场景1：只传 end_time（分页加载）
+            # 从 end_time 往前获取足够的历史数据
+            if end_time and not start_time:
+                logger.info(f"Yahoo OHLCV pagination: interval={yf_interval}, "
+                           f"end_time={end_time}, limit={limit}")
+
+                # 计算需要的时间跨度
+                # Yahoo 不同 interval 的每条数据对应的时间跨度
+                interval_days_map = {
+                    '1m': 1, '5m': 1, '15m': 1, '30m': 1,
+                    '1h': 1, '1d': 1, '1wk': 7, '1mo': 30,
+                }
+                days_per_bar = interval_days_map.get(yf_interval, 1)
+                # 需要的天数 = limit * 每条数据的天数
+                needed_days = limit * days_per_bar + 30  # 加30天缓冲
+
+                # period1 = end_time - needed_days
+                period1 = int((end_time - timedelta(days=needed_days)).timestamp())
+                period2 = int(end_time.timestamp())
+
+                url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
+
+            # 场景2：传 start_time 和 end_time（时间范围查询）
+            elif start_time and end_time:
+                logger.info(f"Yahoo OHLCV range query: interval={yf_interval}, "
+                           f"start={start_time}, end={end_time}")
+
+                period1 = int(start_time.timestamp())
+                period2 = int(end_time.timestamp())
+
+                url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
+
+            # 场景3：不传时间参数（首次加载）
+            else:
+                logger.info(f"Yahoo OHLCV initial load: interval={yf_interval}, limit={limit}")
+
+                # 使用 range=max 获取所有历史数据，然后取最近 limit 条
+                # 或者根据 limit 计算需要的 range
+                interval_days_map = {
+                    '1m': 1, '5m': 1, '15m': 1, '30m': 1,
+                    '1h': 1, '1d': 1, '1wk': 7, '1mo': 30,
+                }
+                days_per_bar = interval_days_map.get(yf_interval, 1)
+                needed_days = limit * days_per_bar + 30
+
+                # Yahoo range 参数: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
+                if needed_days <= 1:
+                    range_param = '1d'
+                elif needed_days <= 5:
+                    range_param = '5d'
+                elif needed_days <= 30:
+                    range_param = '1mo'
+                elif needed_days <= 90:
+                    range_param = '3mo'
+                elif needed_days <= 180:
+                    range_param = '6mo'
+                elif needed_days <= 365:
+                    range_param = '1y'
+                elif needed_days <= 730:
+                    range_param = '2y'
+                elif needed_days <= 1825:
+                    range_param = '5y'
+                else:
+                    range_param = 'max'
+
+                url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={yf_interval}&range={range_param}'
 
             resp = self._session.get(url, timeout=30)
             resp.raise_for_status()
@@ -132,12 +192,13 @@ class YahooFinanceConnector(BaseConnector):
                 if opens[i] is None or closes[i] is None:
                     continue
 
-                # Yahoo返回Unix时间戳（秒）
                 timestamp = timestamps[i]
                 time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
 
-                # 过滤时间范围
-                if time < start_time or time > end_time:
+                # 时间过滤
+                if start_time and time < start_time:
+                    continue
+                if end_time and time >= end_time:  # 分页时排除 end_time 本身
                     continue
 
                 ohlcv = OHLCVData(
@@ -153,8 +214,15 @@ class YahooFinanceConnector(BaseConnector):
             # 按时间正序排列
             ohlcv_list.sort(key=lambda x: x.time)
 
-            # 返回最近limit条数据
-            return ohlcv_list[-limit:] if len(ohlcv_list) > limit else ohlcv_list
+            # 分页加载时，取最后 limit 条（最接近 end_time 的旧数据）
+            if end_time and not start_time and len(ohlcv_list) > limit:
+                ohlcv_list = ohlcv_list[-limit:]
+            # 首次加载时，取最后 limit 条（最近的数据）
+            elif not start_time and not end_time and len(ohlcv_list) > limit:
+                ohlcv_list = ohlcv_list[-limit:]
+
+            logger.info(f"Yahoo OHLCV returned: {len(ohlcv_list)} candles")
+            return ohlcv_list
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Request error fetching OHLCV for {symbol}: {e}")

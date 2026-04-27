@@ -192,33 +192,48 @@ class EastMoneyConnector(BaseConnector):
     async def get_ohlcv(self, symbol: str, interval: str = "1d",
                         start_time: Optional[datetime] = None,
                         end_time: Optional[datetime] = None,
-                        limit: int = 100) -> List[OHLCVData]:
+                        limit: int = 300) -> List[OHLCVData]:
         """
         获取基金净值历史数据
+
+        分页逻辑：
+        - 不传时间参数：返回最近 limit 条数据
+        - 只传 end_time：从 end_time 往前获取 limit 条（分页加载）
+        - 传 start_time/end_time：获取时间范围内的数据
 
         注意：基金净值只有日线数据，其他interval会被标准化为1D
 
         Args:
             symbol: 基金代码
             interval: K线周期（基金只有日线数据，强制使用1D）
-            start_time: 开始时间
-            end_time: 结束时间
-            limit: 返回数量限制
+            start_time: 开始时间（可选）
+            end_time: 结束时间（可选，用于分页）
+            limit: 返回数量限制（默认300）
 
         Returns:
-            净值历史数据列表
+            净值历史数据列表（时间正序：从旧到新）
         """
         # 标准化interval，基金净值只有日线数据
         normalized_interval = normalize_interval(interval)
         if normalized_interval != '1D':
             logger.info(f"基金数据只支持日线，将 '{interval}' 标准化为 '1D'")
+
+        # 场景1：只传 end_time（分页加载）
+        if end_time and not start_time:
+            # 从 end_time 往前获取 limit 条
+            start_time = end_time - timedelta(days=limit + 30)  # 加30天缓冲
+
+        # 场景2和3：不传时间或传时间范围
         if not start_time:
-            start_time = datetime.now(timezone.utc) - timedelta(days=30)
+            start_time = datetime.now(timezone.utc) - timedelta(days=limit + 30)
         if not end_time:
             end_time = datetime.now(timezone.utc)
 
         start_str = start_time.strftime("%Y-%m-%d")
         end_str = end_time.strftime("%Y-%m-%d")
+
+        logger.info(f"EastMoney OHLCV request: symbol={symbol}, "
+                   f"start={start_str}, end={end_str}, limit={limit}")
 
         # 东方财富净值历史API
         url = f"http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={symbol}&page=1&sdate={start_str}&edate={end_str}&per={limit}"
@@ -238,6 +253,10 @@ class EastMoneyConnector(BaseConnector):
                     continue
                 date_str = date_match.group(1)
                 time = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+                # 时间过滤：分页时排除 end_time 本身
+                if end_time and time >= end_time:
+                    continue
 
                 # 提取单位净值
                 value_match = re.search(r"class='tor bold'>([\d.]+)</td>", row)
@@ -260,7 +279,13 @@ class EastMoneyConnector(BaseConnector):
 
         # 按时间正序排列
         ohlcv_list.sort(key=lambda x: x.time)
-        return ohlcv_list[-limit:] if len(ohlcv_list) > limit else ohlcv_list
+
+        # 分页加载时，取最后 limit 条（最接近 end_time 的旧数据）
+        if end_time and len(ohlcv_list) > limit:
+            ohlcv_list = ohlcv_list[-limit:]
+
+        logger.info(f"EastMoney OHLCV returned: {len(ohlcv_list)} candles")
+        return ohlcv_list
 
     async def get_ticker(self, symbol: str) -> TickerData:
         """

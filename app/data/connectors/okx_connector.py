@@ -72,21 +72,29 @@ class OKXConnector(BaseConnector):
     async def get_ohlcv(self, symbol: str, interval: str = "1h",
                         start_time: Optional[datetime] = None,
                         end_time: Optional[datetime] = None,
-                        limit: int = 100) -> List[OHLCVData]:
+                        limit: Optional[int] = None) -> List[OHLCVData]:
         """
         获取K线数据
 
-        ccxt统一接口: fetch_ohlcv
+        OKX API参数说明（通过 ccxt params 传递）:
+        - before: 请求此时间戳之后（更新的数据）
+        - after: 请求此时间戳之前（更旧的数据）
+        - limit: 最大300条
+
+        分页逻辑：
+        - 不传时间参数：返回最近 limit 条数据（从当前往前）
+        - 只传 end_time：从 end_time 往前获取 limit 条（用于分页加载）
+        - 传 start_time/end_time：获取时间范围内的数据
 
         Args:
             symbol: 交易对符号 (如 BTC/USDT，ccxt格式)
             interval: K线周期
-            start_time: 开始时间
-            end_time: 结束时间
-            limit: 返回数量限制 (ccxt默认100，最大1000)
+            start_time: 开始时间（可选）
+            end_time: 结束时间（可选，用于分页）
+            limit: 返回数量限制 (OKX最大300)
 
         Returns:
-            K线数据列表 (按时间正序)
+            K线数据列表 (按时间正序：从旧到新)
         """
         exchange = await self._get_exchange()
         timeframe = to_ccxt_interval(interval)
@@ -95,38 +103,124 @@ class OKXConnector(BaseConnector):
             logger.warning(f"Invalid interval '{interval}', using default 1h")
             timeframe = '1h'
 
-        # ccxt使用毫秒时间戳
-        since = None
-        if start_time:
-            since = int(start_time.timestamp() * 1000)
+        # OKX 单次最大 300 条
+        effective_limit = min(limit or 300, 300)
 
         try:
-            # ccxt返回格式: [[timestamp, open, high, low, close, volume], ...]
-            ohlcv_raw = await exchange.fetch_ohlcv(
-                symbol=symbol,
-                timeframe=timeframe,
-                since=since,
-                limit=limit,
-            )
-
             result = []
-            for item in ohlcv_raw:
-                # 过滤结束时间
-                if end_time:
-                    item_time = datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc)
-                    if item_time > end_time:
-                        continue
 
-                ohlcv = OHLCVData(
-                    time=datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc),
-                    open=Decimal(str(item[1])),
-                    high=Decimal(str(item[2])),
-                    low=Decimal(str(item[3])),
-                    close=Decimal(str(item[4])),
-                    volume=Decimal(str(item[5])),
+            # 场景1：只传 end_time（分页加载）
+            # 使用 OKX API 的 after 参数获取 end_time 之前的旧数据
+            if end_time and not start_time:
+                logger.info(f"OKX OHLCV pagination: interval={timeframe}, "
+                           f"end_time={end_time}, limit={effective_limit}")
+
+                # OKX API: after 参数表示"请求此时间戳之前的数据"
+                # ccxt 通过 params 传递原生参数
+                ohlcv_raw = await exchange.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    limit=effective_limit,
+                    params={'after': int(end_time.timestamp() * 1000)},
                 )
-                result.append(ohlcv)
 
+                # OKX 返回的数据是倒序（最新在前），需要反转成正序
+                for item in reversed(ohlcv_raw):
+                    ohlcv_time = datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc)
+                    # 确保数据在 end_time 之前
+                    if ohlcv_time < end_time:
+                        ohlcv = OHLCVData(
+                            time=ohlcv_time,
+                            open=Decimal(str(item[1])),
+                            high=Decimal(str(item[2])),
+                            low=Decimal(str(item[3])),
+                            close=Decimal(str(item[4])),
+                            volume=Decimal(str(item[5])),
+                        )
+                        result.append(ohlcv)
+
+                # 再次反转确保时间正序（从旧到新）
+                result.sort(key=lambda x: x.time)
+
+            # 场景2：传 start_time 和 end_time（时间范围查询）
+            elif start_time and end_time:
+                time_diff = end_time - start_time
+                interval_minutes = {
+                    '1m': 1, '5m': 5, '15m': 15, '30m': 30,
+                    '1h': 60, '4h': 240, '1d': 1440,
+                    '1w': 10080, '1M': 43200
+                }
+                minutes = interval_minutes.get(timeframe, 60)
+                expected_candles = int(time_diff.total_seconds() / 60 / minutes) + 1
+
+                logger.info(f"OKX OHLCV range query: interval={timeframe}, "
+                           f"start={start_time}, end={end_time}, "
+                           f"expected={expected_candles} candles")
+
+                # 分页获取时间范围内的数据
+                batch_size = 300
+                current_since = int(start_time.timestamp() * 1000)
+                end_ts = int(end_time.timestamp() * 1000)
+                duration_ms = minutes * 60 * 1000
+
+                while current_since < end_ts:
+                    batch_raw = await exchange.fetch_ohlcv(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        since=current_since,
+                        limit=batch_size,
+                        params={},
+                    )
+
+                    if not batch_raw:
+                        break
+
+                    for item in batch_raw:
+                        ohlcv_time = datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc)
+                        if ohlcv_time >= start_time and ohlcv_time <= end_time:
+                            ohlcv = OHLCVData(
+                                time=ohlcv_time,
+                                open=Decimal(str(item[1])),
+                                high=Decimal(str(item[2])),
+                                low=Decimal(str(item[3])),
+                                close=Decimal(str(item[4])),
+                                volume=Decimal(str(item[5])),
+                            )
+                            result.append(ohlcv)
+
+                    last_ts = batch_raw[-1][0]
+                    current_since = last_ts + duration_ms
+
+                    if len(batch_raw) < batch_size or last_ts >= end_ts:
+                        break
+
+            # 场景3：不传时间参数（首次加载）
+            else:
+                logger.info(f"OKX OHLCV initial load: interval={timeframe}, limit={effective_limit}")
+
+                # 获取最近的数据
+                ohlcv_raw = await exchange.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    limit=effective_limit,
+                    params={},
+                )
+
+                for item in ohlcv_raw:
+                    ohlcv = OHLCVData(
+                        time=datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc),
+                        open=Decimal(str(item[1])),
+                        high=Decimal(str(item[2])),
+                        low=Decimal(str(item[3])),
+                        close=Decimal(str(item[4])),
+                        volume=Decimal(str(item[5])),
+                    )
+                    result.append(ohlcv)
+
+                # 确保时间正序
+                result.sort(key=lambda x: x.time)
+
+            logger.info(f"OKX OHLCV returned: {len(result)} candles")
             return result
 
         except ccxt.NetworkError as e:

@@ -203,21 +203,28 @@ async def get_asset_detail(
 @router.get("/{asset_id}/ohlcv", response_model=List[OHLCVResponse])
 async def get_asset_ohlcv(
     asset_id: str,
-    interval: str = Query("1h", description="K线周期: 1m, 5m, 15m, 30m, 1h, 4h, 1d"),
-    start_time: Optional[datetime] = Query(None, description="开始时间"),
-    end_time: Optional[datetime] = Query(None, description="结束时间"),
-    limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
-    force_refresh: bool = Query(False, description="强制从数据源实时获取"),
+    interval: str = Query("1h", alias="interval", description="K线周期: 1m, 5m, 15m, 30m, 1h, 4h, 1d"),
+    start_time: Optional[datetime] = Query(None, alias="startTime", description="开始时间(可选)"),
+    end_time: Optional[datetime] = Query(None, alias="endTime", description="结束时间(可选，用于分页加载)"),
+    limit: int = Query(300, alias="limit", ge=1, le=300, description="返回数量限制(默认300)"),
+    force_refresh: bool = Query(False, alias="forceRefresh", description="强制从数据源实时获取"),
     db = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     获取资产K线数据
 
-    支持不同周期和时间范围查询
+    分页逻辑：
+    - 首次加载：不传参数，返回最近300根K线
+    - 加载更多：传 endTime（第一条K线时间），返回 endTime 之前的300根
 
-    - force_refresh=false: 优先使用数据库缓存（默认）
-    - force_refresh=true: 强制从数据源实时获取
+    时间范围：
+    - 不传 startTime/endTime：从当前时间往前获取 limit 根
+    - 只传 endTime：从 endTime 往前获取 limit 根（用于分页）
+    - 传 startTime/endTime：获取指定时间范围内的数据
+
+    - forceRefresh=false: 优先使用数据库缓存（默认）
+    - forceRefresh=true: 强制从数据源实时获取
     """
     try:
         uuid = UUID(asset_id)
@@ -236,9 +243,8 @@ async def get_asset_ohlcv(
                 detail="资产不存在",
             )
 
-        # 默认查询最近30天
-        if not start_time and not end_time:
-            start_time = datetime.now(timezone.utc) - timedelta(days=30)
+        logger.info(f"OHLCV request: asset={asset.symbol}, interval={interval}, "
+                   f"start={start_time}, end={end_time}, limit={limit}")
 
         ohlcv_list = await service.get_ohlcv(
             asset_id=uuid,

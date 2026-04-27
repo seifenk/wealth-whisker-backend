@@ -46,16 +46,21 @@ class GoldConnector(YahooFinanceConnector):
     async def get_gold_ohlcv(self, symbol: str = "GLD", interval: str = "1d",
                              start_time: Optional[datetime] = None,
                              end_time: Optional[datetime] = None,
-                             limit: int = 100) -> List[OHLCVData]:
+                             limit: int = 300) -> List[OHLCVData]:
         """
         获取黄金K线数据
+
+        分页逻辑：
+        - 不传时间参数：返回最近 limit 条数据
+        - 只传 end_time：从 end_time 往前获取 limit 条（分页加载）
+        - 传 start_time/end_time：获取时间范围内的数据
 
         Args:
             symbol: 黄金资产符号
             interval: K线周期
-            start_time: 开始时间
-            end_time: 结束时间
-            limit: 返回数量限制
+            start_time: 开始时间（可选）
+            end_time: 结束时间（可选，用于分页）
+            limit: 返回数量限制（默认300）
 
         Returns:
             K线数据列表
