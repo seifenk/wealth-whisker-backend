@@ -3,7 +3,7 @@
 """
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
@@ -12,7 +12,6 @@ from sqlalchemy import text
 
 from app.core.database import get_db
 from app.api.dependencies import get_current_user
-from app.core.response import UnifiedResponse
 from app.models.user import User
 from app.schemas.paper_trading import (
     PaperAccountCreate,
@@ -39,17 +38,8 @@ router = APIRouter(prefix="/paper-trading")
 @router.post(
     "/accounts",
     summary="创建模拟账户",
-    response_model=UnifiedResponse[PaperAccountResponse],
-    description="""
-创建一个新的模拟交易账户。
-
-**请求参数**:
-- `name`: 账户名称（1-100字符）
-- `initial_capital`: 初始资金（1000-10000000）
-- `currency`: 货币类型，默认USD
-
-**返回**: 账户详情，包含账户ID、初始资金、现金余额等
-"""
+    response_model=PaperAccountResponse,
+    description="创建一个新的模拟交易账户"
 )
 async def create_account(
     data: PaperAccountCreate,
@@ -70,12 +60,12 @@ async def create_account(
 @router.get(
     "/accounts",
     summary="获取账户列表",
-    response_model=UnifiedResponse[PaperAccountListResponse],
+    response_model=PaperAccountListResponse,
     description="获取当前用户的所有模拟交易账户列表"
 )
 async def list_accounts(
-    skip: int = Query(default=0, ge=0, description="跳过数量"),
-    limit: int = Query(default=20, ge=1, le=100, description="返回数量"),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -95,7 +85,7 @@ async def list_accounts(
 @router.get(
     "/accounts/{account_id}",
     summary="获取账户详情",
-    response_model=UnifiedResponse[PaperAccountResponse],
+    response_model=PaperAccountResponse,
     description="获取指定账户的详细信息"
 )
 async def get_account(
@@ -107,7 +97,7 @@ async def get_account(
     try:
         account_uuid = UUID(account_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的账户ID")
+        raise HTTPException(status_code=400, detail="无效的账户ID")
 
     account = await PaperTradingService.get_account(
         db=db,
@@ -115,7 +105,7 @@ async def get_account(
         user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     return PaperAccountResponse.model_validate(account)
 
@@ -123,7 +113,6 @@ async def get_account(
 @router.get(
     "/accounts/{account_id}/summary",
     summary="获取账户摘要",
-    response_model=UnifiedResponse[Dict[str, Any]],
     description="获取账户摘要（包含持仓总市值、盈亏等统计信息）"
 )
 async def get_account_summary(
@@ -131,11 +120,11 @@ async def get_account_summary(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取账户摘要（包含持仓总市值、盈亏等）"""
+    """获取账户摘要"""
     try:
         account_uuid = UUID(account_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的账户ID")
+        raise HTTPException(status_code=400, detail="无效的账户ID")
 
     summary = await PaperTradingService.get_account_summary(
         db=db,
@@ -155,7 +144,7 @@ async def get_account_summary(
 @router.put(
     "/accounts/{account_id}",
     summary="更新账户信息",
-    response_model=UnifiedResponse[PaperAccountResponse],
+    response_model=PaperAccountResponse,
     description="更新账户名称"
 )
 async def update_account(
@@ -168,7 +157,7 @@ async def update_account(
     try:
         account_uuid = UUID(account_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的账户ID")
+        raise HTTPException(status_code=400, detail="无效的账户ID")
 
     account = await PaperTradingService.get_account(
         db=db,
@@ -176,7 +165,7 @@ async def update_account(
         user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     if data.name:
         account.name = data.name
@@ -191,7 +180,7 @@ async def update_account(
 @router.get(
     "/accounts/{account_id}/positions",
     summary="获取持仓列表",
-    response_model=UnifiedResponse[PositionListResponse],
+    response_model=PositionListResponse,
     description="获取账户当前持仓，包含实时盈亏计算"
 )
 async def list_positions(
@@ -203,26 +192,35 @@ async def list_positions(
     try:
         account_uuid = UUID(account_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的账户ID")
+        raise HTTPException(status_code=400, detail="无效的账户ID")
 
     account = await PaperTradingService.get_account(
-        db=db,
-        account_id=account_uuid,
-        user_id=current_user.id
+        db=db, account_id=account_uuid, user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     await PaperTradingService.update_account_prices(db, account_uuid)
     positions = await PaperTradingService.get_positions(db, account_uuid)
 
     items = []
     for pos in positions:
-        pos_data = PositionResponse.model_validate(pos)
+        pos_dict = {
+            "id": pos.id,
+            "account_id": pos.account_id,
+            "asset_id": pos.asset_id,
+            "quantity": pos.quantity,
+            "avg_cost": pos.avg_cost,
+            "current_price": pos.current_price,
+            "market_value": pos.market_value,
+            "unrealized_pnl": pos.unrealized_pnl,
+            "unrealized_pnl_pct": pos.unrealized_pnl_pct,
+            "opened_at": pos.opened_at,
+        }
         if pos.asset:
-            pos_data.asset_symbol = pos.asset.symbol
-            pos_data.asset_name = pos.asset.name
-        items.append(pos_data)
+            pos_dict["asset_symbol"] = pos.asset.symbol
+            pos_dict["asset_name"] = pos.asset.name
+        items.append(PositionResponse(**pos_dict))
 
     return PositionListResponse(items=items, total=len(items))
 
@@ -232,19 +230,8 @@ async def list_positions(
 @router.post(
     "/accounts/{account_id}/orders",
     summary="创建订单",
-    response_model=UnifiedResponse[OrderResponse],
-    description="""
-创建交易订单（市价单或限价单）。
-
-**请求参数**:
-- `asset_id`: 资产ID（UUID格式）
-- `order_type`: 订单类型 - `market`(市价单) 或 `limit`(限价单)
-- `side`: 交易方向 - `buy`(买入) 或 `sell`(卖出)
-- `quantity`: 交易数量
-- `price`: 限价单价格（限价单必填）
-
-**注意**: 买入时需确保资金充足，卖出时需确保持仓充足
-"""
+    response_model=OrderResponse,
+    description="创建交易订单（市价单或限价单）"
 )
 async def create_order(
     account_id: str,
@@ -252,20 +239,18 @@ async def create_order(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建订单（市价单或限价单）"""
+    """创建订单"""
     try:
         account_uuid = UUID(account_id)
         asset_uuid = UUID(data.asset_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的ID格式")
+        raise HTTPException(status_code=400, detail="无效的ID格式")
 
     account = await PaperTradingService.get_account(
-        db=db,
-        account_id=account_uuid,
-        user_id=current_user.id
+        db=db, account_id=account_uuid, user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     order = await PaperTradingService.create_order(
         db=db,
@@ -282,18 +267,8 @@ async def create_order(
 @router.post(
     "/accounts/{account_id}/orders/{order_id}/execute",
     summary="执行订单",
-    response_model=UnifiedResponse[OrderResponse],
-    description="""
-执行已创建的订单，完成交易撮合。
-
-**流程**:
-1. 获取当前市场价格（市价单）或使用限价
-2. 计算交易金额和手续费（0.1%）
-3. 更新账户余额和持仓
-4. 创建交易记录和账户快照
-
-**返回**: 执行后的订单详情，包含成交价格、数量、手续费等
-"""
+    response_model=OrderResponse,
+    description="执行订单完成交易撮合"
 )
 async def execute_order(
     account_id: str,
@@ -301,23 +276,21 @@ async def execute_order(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """执行订单（撮合成交）"""
+    """执行订单"""
     try:
         account_uuid = UUID(account_id)
         order_uuid = UUID(order_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的ID格式")
+        raise HTTPException(status_code=400, detail="无效的ID格式")
 
     account = await PaperTradingService.get_account(
-        db=db,
-        account_id=account_uuid,
-        user_id=current_user.id
+        db=db, account_id=account_uuid, user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     order = await PaperTradingService.execute_order(db, order_uuid)
-    order_data = OrderResponse.model_validate(order)
+    order_dict = OrderResponse.model_validate(order).model_dump()
 
     asset_result = await db.execute(
         text("SELECT symbol, name FROM assets WHERE id = :asset_id"),
@@ -325,17 +298,17 @@ async def execute_order(
     )
     asset_row = asset_result.fetchone()
     if asset_row:
-        order_data.asset_symbol = asset_row[0]
-        order_data.asset_name = asset_row[1]
+        order_dict["asset_symbol"] = asset_row[0]
+        order_dict["asset_name"] = asset_row[1]
 
-    return order_data
+    return OrderResponse(**order_dict)
 
 
 @router.post(
     "/accounts/{account_id}/orders/{order_id}/cancel",
     summary="取消订单",
-    response_model=UnifiedResponse[OrderResponse],
-    description="取消未执行的待处理订单"
+    response_model=OrderResponse,
+    description="取消未执行的订单"
 )
 async def cancel_order(
     account_id: str,
@@ -343,20 +316,18 @@ async def cancel_order(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """取消未执行的订单"""
+    """取消订单"""
     try:
         account_uuid = UUID(account_id)
         order_uuid = UUID(order_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的ID格式")
+        raise HTTPException(status_code=400, detail="无效的ID格式")
 
     account = await PaperTradingService.get_account(
-        db=db,
-        account_id=account_uuid,
-        user_id=current_user.id
+        db=db, account_id=account_uuid, user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     order = await PaperTradingService.cancel_order(db, order_uuid)
     return OrderResponse.model_validate(order)
@@ -365,51 +336,45 @@ async def cancel_order(
 @router.get(
     "/accounts/{account_id}/orders",
     summary="获取订单列表",
-    response_model=UnifiedResponse[OrderListResponse],
-    description="获取账户的历史订单列表，可按状态过滤"
+    response_model=OrderListResponse,
+    description="获取账户的历史订单列表"
 )
 async def list_orders(
     account_id: str,
-    status_filter: Optional[str] = Query(default=None, alias="status", description="订单状态: pending, filled, cancelled"),
-    skip: int = Query(default=0, ge=0, description="跳过数量"),
-    limit: int = Query(default=50, ge=1, le=200, description="返回数量"),
+    order_status: Optional[str] = Query(default=None, alias="status", description="订单状态过滤"),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取账户订单列表"""
+    """获取订单列表"""
     try:
         account_uuid = UUID(account_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的账户ID")
+        raise HTTPException(status_code=400, detail="无效的账户ID")
 
     account = await PaperTradingService.get_account(
-        db=db,
-        account_id=account_uuid,
-        user_id=current_user.id
+        db=db, account_id=account_uuid, user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     orders = await PaperTradingService.get_orders(
-        db=db,
-        account_id=account_uuid,
-        status=status_filter,
-        skip=skip,
-        limit=limit
+        db=db, account_id=account_uuid, status=order_status, skip=skip, limit=limit
     )
 
     items = []
     for order in orders:
-        order_data = OrderResponse.model_validate(order)
+        order_dict = OrderResponse.model_validate(order).model_dump()
         asset_result = await db.execute(
             text("SELECT symbol, name FROM assets WHERE id = :asset_id"),
             {"asset_id": str(order.asset_id)}
         )
         asset_row = asset_result.fetchone()
         if asset_row:
-            order_data.asset_symbol = asset_row[0]
-            order_data.asset_name = asset_row[1]
-        items.append(order_data)
+            order_dict["asset_symbol"] = asset_row[0]
+            order_dict["asset_name"] = asset_row[1]
+        items.append(OrderResponse(**order_dict))
 
     return OrderListResponse(items=items, total=len(items))
 
@@ -419,49 +384,44 @@ async def list_orders(
 @router.get(
     "/accounts/{account_id}/transactions",
     summary="获取交易记录",
-    response_model=UnifiedResponse[TransactionListResponse],
+    response_model=TransactionListResponse,
     description="获取账户的历史交易记录"
 )
 async def list_transactions(
     account_id: str,
-    skip: int = Query(default=0, ge=0, description="跳过数量"),
-    limit: int = Query(default=50, ge=1, le=200, description="返回数量"),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取账户交易记录"""
+    """获取交易记录"""
     try:
         account_uuid = UUID(account_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的账户ID")
+        raise HTTPException(status_code=400, detail="无效的账户ID")
 
     account = await PaperTradingService.get_account(
-        db=db,
-        account_id=account_uuid,
-        user_id=current_user.id
+        db=db, account_id=account_uuid, user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     transactions = await PaperTradingService.get_transactions(
-        db=db,
-        account_id=account_uuid,
-        skip=skip,
-        limit=limit
+        db=db, account_id=account_uuid, skip=skip, limit=limit
     )
 
     items = []
     for tx in transactions:
-        tx_data = TransactionResponse.model_validate(tx)
+        tx_dict = TransactionResponse.model_validate(tx).model_dump()
         asset_result = await db.execute(
             text("SELECT symbol, name FROM assets WHERE id = :asset_id"),
             {"asset_id": str(tx.asset_id)}
         )
         asset_row = asset_result.fetchone()
         if asset_row:
-            tx_data.asset_symbol = asset_row[0]
-            tx_data.asset_name = asset_row[1]
-        items.append(tx_data)
+            tx_dict["asset_symbol"] = asset_row[0]
+            tx_dict["asset_name"] = asset_row[1]
+        items.append(TransactionResponse(**tx_dict))
 
     return TransactionListResponse(items=items, total=len(items))
 
@@ -471,49 +431,35 @@ async def list_transactions(
 @router.get(
     "/accounts/{account_id}/performance",
     summary="获取绩效分析",
-    response_model=UnifiedResponse[Dict[str, Any]],
-    description="""
-获取账户绩效分析报告。
-
-**返回内容**:
-- `overview`: 绩效概览（总市值、收益率、日盈亏）
-- `metrics`: 绩效指标（年化收益、最大回撤、夏普比率、胜率）
-- `equity_curve`: 资金曲线数据
-"""
+    description="获取账户绩效分析报告"
 )
 async def get_performance(
     account_id: str,
-    start_time: Optional[datetime] = Query(default=None, description="开始时间"),
-    end_time: Optional[datetime] = Query(default=None, description="结束时间"),
+    start_time: Optional[datetime] = Query(default=None),
+    end_time: Optional[datetime] = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取账户绩效分析"""
+    """获取绩效分析"""
     try:
         account_uuid = UUID(account_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的账户ID")
+        raise HTTPException(status_code=400, detail="无效的账户ID")
 
     account = await PaperTradingService.get_account(
-        db=db,
-        account_id=account_uuid,
-        user_id=current_user.id
+        db=db, account_id=account_uuid, user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     if not start_time:
         start_time = datetime.utcnow() - timedelta(days=30)
     if not end_time:
         end_time = datetime.utcnow()
 
-    performance = await PaperTradingService.calculate_performance(
-        db=db,
-        account_id=account_uuid,
-        start_time=start_time,
-        end_time=end_time
+    return await PaperTradingService.calculate_performance(
+        db=db, account_id=account_uuid, start_time=start_time, end_time=end_time
     )
-    return performance
 
 
 # ============ 账户快照 ============
@@ -521,40 +467,36 @@ async def get_performance(
 @router.get(
     "/accounts/{account_id}/snapshots",
     summary="获取账户快照",
-    response_model=UnifiedResponse[SnapshotListResponse],
-    description="获取账户历史快照，用于绘制资金曲线"
+    response_model=SnapshotListResponse,
+    description="获取账户历史快照用于绘制资金曲线"
 )
 async def list_snapshots(
     account_id: str,
-    start_time: Optional[datetime] = Query(default=None, description="开始时间"),
-    end_time: Optional[datetime] = Query(default=None, description="结束时间"),
-    skip: int = Query(default=0, ge=0, description="跳过数量"),
-    limit: int = Query(default=100, ge=1, le=365, description="返回数量"),
+    start_time: Optional[datetime] = Query(default=None),
+    end_time: Optional[datetime] = Query(default=None),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取账户历史快照（资金曲线）"""
+    """获取账户快照"""
     try:
         account_uuid = UUID(account_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的账户ID")
+        raise HTTPException(status_code=400, detail="无效的账户ID")
 
     account = await PaperTradingService.get_account(
-        db=db,
-        account_id=account_uuid,
-        user_id=current_user.id
+        db=db, account_id=account_uuid, user_id=current_user.id
     )
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+        raise HTTPException(status_code=404, detail="账户不存在")
 
     snapshots = await PaperTradingService.get_snapshots(
-        db=db,
-        account_id=account_uuid,
-        start_time=start_time,
-        end_time=end_time,
-        skip=skip,
-        limit=limit
+        db=db, account_id=account_uuid,
+        start_time=start_time, end_time=end_time, skip=skip, limit=limit
     )
 
-    items = [AccountSnapshotResponse.model_validate(s) for s in snapshots]
-    return SnapshotListResponse(items=items, total=len(items))
+    return SnapshotListResponse(
+        items=[AccountSnapshotResponse.model_validate(s) for s in snapshots],
+        total=len(snapshots)
+    )
