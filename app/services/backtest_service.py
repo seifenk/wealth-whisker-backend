@@ -71,8 +71,24 @@ class BacktestService:
             # 获取配置
             config = job.config
             asset_ids = [UUID(aid) for aid in config.get("asset_ids", [])]
-            start_date = config.get("start_date")
-            end_date = config.get("end_date")
+
+            # 解析时间（字符串转datetime）
+            start_date_str = config.get("start_date")
+            end_date_str = config.get("end_date")
+
+            if isinstance(start_date_str, str):
+                # 处理ISO格式字符串（去掉Z后缀）
+                start_date_str = start_date_str.replace("Z", "+00:00")
+                start_date = datetime.fromisoformat(start_date_str)
+            else:
+                start_date = start_date_str
+
+            if isinstance(end_date_str, str):
+                end_date_str = end_date_str.replace("Z", "+00:00")
+                end_date = datetime.fromisoformat(end_date_str)
+            else:
+                end_date = end_date_str
+
             initial_capital = Decimal(str(config.get("initial_capital", 10000)))
 
             # 获取价格数据
