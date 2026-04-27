@@ -187,7 +187,7 @@ class PaperTradingService:
         # 订单预检查
         if order_type == "market":
             # 获取当前价格
-            current_price = await AssetService.get_latest_price(db, asset_id)
+            current_price = await get_latest_price(db, asset_id)
             if not current_price:
                 raise AppException("VALIDATION_ERROR", "无法获取当前价格")
             estimated_cost = quantity * current_price
@@ -239,7 +239,7 @@ class PaperTradingService:
 
         # 确定执行价格
         if order.order_type == "market":
-            execution_price = await AssetService.get_latest_price(db, order.asset_id)
+            execution_price = await get_latest_price(db, order.asset_id)
             if not execution_price:
                 raise AppException("VALIDATION_ERROR", "无法获取当前价格")
         else:
