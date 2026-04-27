@@ -158,6 +158,7 @@ class MACrossStrategy(BacktestEngine):
         position = Decimal("0")  # 持仓数量
         equity_curve = []
         trades = []
+        buy_trade = None  # 记录买入交易用于计算盈亏
 
         for i in range(slow_period, len(prices)):
             price = Decimal(str(closes[i]))
@@ -181,17 +182,18 @@ class MACrossStrategy(BacktestEngine):
                         position = shares
                         cash = Decimal("0")
 
-                        trades.append({
+                        buy_trade = {
                             "time": prices[i]["time"],
                             "action": "buy",
                             "price": float(buy_price),
                             "quantity": float(shares),
                             "value": float(shares * buy_price),
-                        })
+                        }
+                        trades.append(buy_trade)
 
                 # 死叉：快线突破慢线向下
                 elif prev_fast >= prev_slow and fast < slow:
-                    if position > 0:
+                    if position > 0 and buy_trade:
                         # 卖出
                         sell_price = self.apply_slippage(price, False)
                         value = position * sell_price
@@ -199,33 +201,64 @@ class MACrossStrategy(BacktestEngine):
                         cash = value - commission
                         position = Decimal("0")
 
+                        # 计算盈亏
+                        profit = cash - Decimal(str(buy_trade["value"]))
+                        profit_pct = float(profit / Decimal(str(buy_trade["value"])) * 100)
+
                         trades.append({
                             "time": prices[i]["time"],
                             "action": "sell",
                             "price": float(sell_price),
-                            "quantity": float(position),
+                            "quantity": float(buy_trade["quantity"]),
                             "value": float(value),
+                            "profit": float(profit),
+                            "profit_pct": round(profit_pct, 2),
                         })
+                        buy_trade = None
 
             # 计算当日净值
             equity = cash + position * price
             equity_curve.append(equity)
 
-        # 最后如果还有持仓，按最后价格清仓
-        if position > 0:
+        # 最后如果还有持仓，按最后价格清仓计算盈亏
+        if position > 0 and buy_trade:
             final_price = Decimal(str(closes[-1]))
-            equity = cash + position * final_price
-            equity_curve[-1] = equity
+            sell_price = self.apply_slippage(final_price, False)
+            value = position * sell_price
+            commission = self.calculate_commission(value)
+            cash = value - commission
+
+            # 计算盈亏
+            profit = cash - Decimal(str(buy_trade["value"]))
+            profit_pct = float(profit / Decimal(str(buy_trade["value"])) * 100)
+
+            trades.append({
+                "time": prices[-1]["time"],
+                "action": "sell",
+                "price": float(sell_price),
+                "quantity": float(buy_trade["quantity"]),
+                "value": float(value),
+                "profit": float(profit),
+                "profit_pct": round(profit_pct, 2),
+            })
+            equity_curve[-1] = cash
 
         # 计算指标
         metrics = self.calculate_metrics(equity_curve)
 
+        # 计算胜率
+        sell_trades = [t for t in trades if t["action"] == "sell"]
+        profit_trades = sum(1 for t in sell_trades if t.get("profit", 0) > 0)
+        loss_trades = sum(1 for t in sell_trades if t.get("profit", 0) <= 0)
+        win_rate = profit_trades / len(sell_trades) * 100 if sell_trades else 0
+
         return {
             **metrics,
+            "win_rate": round(win_rate, 2),
             "total_trades": len(trades),
-            "profit_trades": sum(1 for t in trades if t["action"] == "sell" and t.get("profit", 0) > 0),
-            "loss_trades": sum(1 for t in trades if t["action"] == "sell" and t.get("profit", 0) <= 0),
-            "equity_curve": [{"time": prices[i]["time"], "equity": float(e)} for i, e in enumerate(equity_curve)],
+            "profit_trades": profit_trades,
+            "loss_trades": loss_trades,
+            "equity_curve": [{"time": prices[i+slow_period]["time"], "equity": float(e)} for i, e in enumerate(equity_curve)],
             "trades": trades,
         }
 
@@ -351,9 +384,18 @@ class MomentumStrategy(BacktestEngine):
         # 计算指标
         metrics = self.calculate_metrics(equity_curve)
 
+        # 计算胜率（多资产轮动策略）
+        sell_trades = [t for t in trades if t["action"] == "sell"]
+        profit_trades = sum(1 for t in sell_trades if t.get("profit", 0) > 0)
+        loss_trades = sum(1 for t in sell_trades if t.get("profit", 0) <= 0)
+        win_rate = profit_trades / len(sell_trades) * 100 if sell_trades else None
+
         return {
             **metrics,
+            "win_rate": round(win_rate, 2) if win_rate else None,
             "total_trades": len(trades),
+            "profit_trades": profit_trades,
+            "loss_trades": loss_trades,
             "equity_curve": [{"time": first_asset_prices[i+lookback]["time"], "equity": float(e)} for i, e in enumerate(equity_curve)],
             "trades": trades,
         }
@@ -437,7 +479,10 @@ class DCAStrategy(BacktestEngine):
 
         return {
             **metrics,
+            "win_rate": None,  # 定投策略不适用胜率概念
             "total_trades": len(trades),
+            "profit_trades": 0,
+            "loss_trades": 0,
             "total_invested": float(total_invested),
             "equity_curve": [{"time": prices[i+start_delay]["time"], "equity": float(e)} for i, e in enumerate(equity_curve)],
             "trades": trades,
@@ -587,9 +632,18 @@ class RiskParityStrategy(BacktestEngine):
         # 计算指标
         metrics = self.calculate_metrics(equity_curve)
 
+        # 风险平价策略胜率
+        sell_trades = [t for t in trades if t["action"] == "sell"]
+        profit_trades = sum(1 for t in sell_trades if t.get("profit", 0) > 0)
+        loss_trades = sum(1 for t in sell_trades if t.get("profit", 0) <= 0)
+        win_rate = profit_trades / len(sell_trades) * 100 if sell_trades else None
+
         return {
             **metrics,
+            "win_rate": round(win_rate, 2) if win_rate else None,
             "total_trades": len(trades),
+            "profit_trades": profit_trades,
+            "loss_trades": loss_trades,
             "equity_curve": [{"time": first_asset_prices[i+lookback]["time"], "equity": float(e)} for i, e in enumerate(equity_curve)],
             "trades": trades,
         }
