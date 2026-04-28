@@ -144,15 +144,25 @@ class BacktestService:
             # 序列化结果数据用于JSON存储
             serializable_result = serialize_datetime(result_data)
 
+            # 辅助函数：安全转换为Decimal
+            def safe_decimal(value, default="0"):
+                """安全将值转换为Decimal，处理None和异常值"""
+                if value is None:
+                    return Decimal(default)
+                try:
+                    return Decimal(str(value))
+                except:
+                    return Decimal(default)
+
             # 保存结果
             result = BacktestResult(
                 job_id=job_id,
-                total_return=Decimal(str(result_data.get("total_return", 0))),
-                annualized_return=Decimal(str(result_data.get("annualized_return", 0))),
-                max_drawdown=Decimal(str(result_data.get("max_drawdown", 0))),
-                volatility=Decimal(str(result_data.get("volatility", 0))),
-                sharpe_ratio=Decimal(str(result_data.get("sharpe_ratio", 0))),
-                win_rate=Decimal(str(result_data.get("win_rate", 0))),
+                total_return=safe_decimal(result_data.get("total_return")),
+                annualized_return=safe_decimal(result_data.get("annualized_return")),
+                max_drawdown=safe_decimal(result_data.get("max_drawdown")),
+                volatility=safe_decimal(result_data.get("volatility")),
+                sharpe_ratio=safe_decimal(result_data.get("sharpe_ratio")),
+                win_rate=safe_decimal(result_data.get("win_rate")),
                 total_trades=result_data.get("total_trades", 0),
                 profit_trades=result_data.get("profit_trades", 0),
                 loss_trades=result_data.get("loss_trades", 0),
