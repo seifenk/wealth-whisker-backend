@@ -19,6 +19,7 @@
 **测试覆盖率**：43% (30个API测试全部通过)
 
 **最近修复**：
+- ✅ 模拟账户删除接口（级联删除）
 - ✅ Yahoo connector change_24h 数据计算修复
 - ✅ OKX connector 分页逻辑修复（日线返回365天数据）
 - ✅ OHLCV 数据入库逻辑修复（添加 commit）
@@ -182,6 +183,7 @@ wealth-whisker-backend/
 
 ### 模拟交易 `/api/v1/paper-trading`
 - `POST /accounts` - 创建模拟账户
+- `DELETE /accounts/{id}` - 删除模拟账户（级联删除持仓、订单、交易记录）
 - `GET /accounts` - 账户列表
 - `GET /accounts/{id}/positions` - 持仓
 - `POST /accounts/{id}/orders` - 创建订单
@@ -372,6 +374,7 @@ wealth-whisker-backend/
 **任务清单**：
 1. 模拟账户管理 ✅ 已完成
    - [x] ~~创建模拟账户API~~
+   - [x] ~~删除模拟账户API（级联删除持仓、订单、交易记录、快照）~~
    - [x] ~~账户资金管理~~
    - [x] ~~账户快照定时任务~~
    
