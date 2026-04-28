@@ -113,7 +113,6 @@ async def get_account(
 @router.delete(
     "/accounts/{account_id}",
     summary="删除模拟账户",
-    status_code=204,
     description="""
 删除模拟账户及其所有关联数据。
 
@@ -142,7 +141,7 @@ async def delete_account(
         account_id=account_uuid,
         user_id=current_user.id
     )
-    return None  # 204 No Content
+    return {"message": "账户已删除"}
 
 
 @router.get(
