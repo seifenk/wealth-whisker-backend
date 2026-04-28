@@ -76,6 +76,27 @@ class PaperTradingService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def delete_account(db: AsyncSession, account_id: UUID, user_id: UUID) -> bool:
+        """
+        删除模拟账户
+
+        由于数据库外键设置了ondelete='CASCADE'，删除账户时会自动级联删除：
+        - positions（持仓）
+        - orders（订单）
+        - transactions（交易记录）
+        - account_snapshots（账户快照）
+        """
+        account = await PaperTradingService.get_account(db, account_id, user_id)
+        if not account:
+            raise AppException("NOT_FOUND", "账户不存在")
+
+        await db.delete(account)
+        await db.commit()
+
+        logger.info(f"Deleted paper account {account_id} and all related records")
+        return True
+
+    @staticmethod
     async def get_account_summary(
         db: AsyncSession,
         account_id: UUID,

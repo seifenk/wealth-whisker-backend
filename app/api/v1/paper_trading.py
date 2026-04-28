@@ -110,6 +110,41 @@ async def get_account(
     return PaperAccountResponse.model_validate(account)
 
 
+@router.delete(
+    "/accounts/{account_id}",
+    summary="删除模拟账户",
+    status_code=204,
+    description="""
+删除模拟账户及其所有关联数据。
+
+**级联删除内容**:
+- 持仓记录（positions）
+- 订单记录（orders）
+- 交易记录（transactions）
+- 账户快照（account_snapshots）
+
+**注意**: 此操作不可撤销，请谨慎操作。
+"""
+)
+async def delete_account(
+    account_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """删除模拟账户（级联删除持仓、订单、交易记录、快照）"""
+    try:
+        account_uuid = UUID(account_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的账户ID")
+
+    await PaperTradingService.delete_account(
+        db=db,
+        account_id=account_uuid,
+        user_id=current_user.id
+    )
+    return None  # 204 No Content
+
+
 @router.get(
     "/accounts/{account_id}/summary",
     summary="获取账户摘要",
