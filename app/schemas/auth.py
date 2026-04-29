@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.schemas.enums import RiskPreference
+
 
 class UserCreate(BaseModel):
     """用户注册请求"""
@@ -42,7 +44,7 @@ class UserResponse(BaseModel):
     email: str
     nickname: Optional[str] = None
     avatar_url: Optional[str] = None
-    risk_preference: str = "balanced"
+    risk_preference: RiskPreference = RiskPreference.BALANCED
     is_active: bool = True
     disclaimer_accepted: bool = False
     disclaimer_accepted_at: Optional[datetime] = None
@@ -80,15 +82,7 @@ class UserUpdate(BaseModel):
 
     nickname: Optional[str] = Field(None, max_length=100, description="昵称")
     avatar_url: Optional[str] = Field(None, max_length=500, description="头像URL")
-    risk_preference: Optional[str] = Field(None, description="风险偏好")
-
-    @field_validator("risk_preference")
-    @classmethod
-    def validate_risk_preference(cls, v: Optional[str]) -> Optional[str]:
-        """验证风险偏好"""
-        if v is not None and v not in ["conservative", "balanced", "aggressive"]:
-            raise ValueError("风险偏好必须是 conservative, balanced 或 aggressive")
-        return v
+    risk_preference: Optional[RiskPreference] = Field(None, description="风险偏好")
 
 
 class PasswordChange(BaseModel):

@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.enums import RiskLevel
+
 
 # ============ 研究结论卡片 ============
 
@@ -26,7 +28,7 @@ class ResearchCardResponse(BaseModel):
     title: str
     conclusion: str
     confidence_score: Optional[Decimal] = None
-    risk_level: Optional[str] = None
+    risk_level: Optional[RiskLevel] = None
     indicators: Optional[Dict[str, Any]] = None
     reasoning: Optional[str] = None
     suitable_for: Optional[List[str]] = None

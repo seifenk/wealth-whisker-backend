@@ -16,6 +16,7 @@ from app.schemas.strategy import (
     BacktestJobListResponse,
     BacktestResultResponse,
 )
+from app.schemas.enums import BacktestJobStatus
 from app.services.strategy_service import StrategyService
 from app.services.backtest_service import BacktestService
 
@@ -55,7 +56,7 @@ async def create_backtest_job(
         "start_date": data.start_date.isoformat(),
         "end_date": data.end_date.isoformat(),
         "initial_capital": str(data.initial_capital),
-        "rebalance_frequency": data.rebalance_frequency,
+        "rebalance_frequency": data.rebalance_frequency.value,
     }
 
     service = StrategyService(db)
@@ -86,7 +87,7 @@ async def create_backtest_job(
 
 @router.get("/jobs", response_model=BacktestJobListResponse)
 async def get_backtest_jobs(
-    status_filter: Optional[str] = Query(None, alias="status", description="状态过滤: pending, running, completed, failed"),
+    status_filter: Optional[BacktestJobStatus] = Query(None, alias="status", description="状态过滤"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db = Depends(get_db),
@@ -100,7 +101,7 @@ async def get_backtest_jobs(
     service = StrategyService(db)
     jobs = await service.get_backtest_jobs(
         user_id=current_user.id,
-        status=status_filter,
+        status=status_filter.value if status_filter else None,
         limit=limit,
         offset=offset,
     )

@@ -137,9 +137,11 @@ class TestAssetAPI:
         response = await client.get("/api/v1/assets/dashboard?risk_preference=aggressive")
         assert response.status_code == 200
 
-        # 测试无效的风险偏好
+        # 测试无效的风险偏好（FastAPI枚举验证返回HTTP 200，code=400）
         response = await client.get("/api/v1/assets/dashboard?risk_preference=invalid")
-        assert response.status_code == 400
+        assert response.status_code == 200
+        data = response.json()
+        assert data["code"] == ResponseCode.VALIDATION_ERROR
 
     @pytest.mark.asyncio
     async def test_dashboard_sort(self, client, db_session, test_assets, test_metrics, override_get_db):

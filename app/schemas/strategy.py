@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.enums import BacktestJobStatus, MAType, OrderSide, RebalanceFrequency
+
 
 # ============ 策略模板 ============
 
@@ -80,7 +82,7 @@ class BacktestJobCreate(BaseModel):
     start_date: datetime
     end_date: datetime
     initial_capital: Decimal = Field(default=Decimal("10000"), ge=100)
-    rebalance_frequency: str = Field(default="daily", description="调仓频率: daily, weekly, monthly")
+    rebalance_frequency: RebalanceFrequency = Field(default=RebalanceFrequency.DAILY, description="调仓频率")
 
 
 class BacktestJobResponse(BaseModel):
@@ -88,7 +90,7 @@ class BacktestJobResponse(BaseModel):
     id: UUID
     strategy_id: UUID
     strategy_name: Optional[str] = None
-    status: str  # pending, running, completed, failed
+    status: BacktestJobStatus
     config: Dict[str, Any]
     error_message: Optional[str] = None
     created_at: datetime
@@ -112,7 +114,7 @@ class TradeRecord(BaseModel):
     time: datetime
     asset_id: str
     asset_symbol: str
-    action: str  # buy, sell
+    action: OrderSide
     quantity: Decimal
     price: Decimal
     value: Decimal

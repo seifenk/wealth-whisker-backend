@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.enums import Currency, OrderSide, OrderStatus, OrderType
+
 
 # ============ 模拟账户 ============
 
@@ -15,7 +17,7 @@ class PaperAccountCreate(BaseModel):
     """创建模拟账户"""
     name: str = Field(..., min_length=1, max_length=100, description="账户名称")
     initial_capital: Decimal = Field(default=Decimal("100000"), ge=1000, le=10000000, description="初始资金")
-    currency: str = Field(default="USD", description="货币类型")
+    currency: Currency = Field(default=Currency.USD, description="货币类型")
 
 
 class PaperAccountUpdate(BaseModel):
@@ -31,7 +33,7 @@ class PaperAccountResponse(BaseModel):
     initial_capital: Decimal
     current_capital: Decimal
     cash_balance: Decimal
-    currency: str
+    currency: Currency
     created_at: datetime
     updated_at: datetime
 
@@ -87,8 +89,8 @@ class PositionListResponse(BaseModel):
 class OrderCreate(BaseModel):
     """创建订单"""
     asset_id: str = Field(..., description="资产ID")
-    order_type: str = Field(default="market", description="订单类型: market, limit")
-    side: str = Field(..., description="方向: buy, sell")
+    order_type: OrderType = Field(default=OrderType.MARKET, description="订单类型")
+    side: OrderSide = Field(..., description="交易方向")
     quantity: Decimal = Field(..., gt=0, description="数量")
     price: Optional[Decimal] = Field(None, gt=0, description="限价单价格")
 
@@ -100,11 +102,11 @@ class OrderResponse(BaseModel):
     asset_id: UUID
     asset_symbol: Optional[str] = None
     asset_name: Optional[str] = None
-    order_type: str
-    side: str
+    order_type: OrderType
+    side: OrderSide
     quantity: Decimal
     price: Optional[Decimal] = None
-    status: str
+    status: OrderStatus
     filled_quantity: Optional[Decimal] = None
     filled_price: Optional[Decimal] = None
     commission: Decimal
@@ -131,7 +133,7 @@ class TransactionResponse(BaseModel):
     asset_id: UUID
     asset_symbol: Optional[str] = None
     asset_name: Optional[str] = None
-    side: str
+    side: OrderSide
     quantity: Decimal
     price: Decimal
     total_amount: Decimal

@@ -15,6 +15,7 @@ from app.models.paper_trading import PaperAccount, Position, Order, Transaction,
 from app.models.asset import Asset
 from app.core.exceptions import AppException
 from app.services.asset_service import get_latest_price
+from app.schemas.enums import OrderType, OrderSide
 
 
 class PaperTradingService:
@@ -179,18 +180,14 @@ class PaperTradingService:
         db: AsyncSession,
         account_id: UUID,
         asset_id: UUID,
-        order_type: str,
-        side: str,
+        order_type: OrderType,
+        side: OrderSide,
         quantity: Decimal,
         price: Optional[Decimal] = None
     ) -> Order:
         """创建订单"""
-        # 验证订单类型
-        if order_type not in ["market", "limit"]:
-            raise AppException("VALIDATION_ERROR", "订单类型必须是 market 或 limit")
-        if side not in ["buy", "sell"]:
-            raise AppException("VALIDATION_ERROR", "订单方向必须是 buy 或 sell")
-        if order_type == "limit" and price is None:
+        # 验证订单类型（枚举已提供类型安全，无需额外验证）
+        if order_type == OrderType.LIMIT and price is None:
             raise AppException("VALIDATION_ERROR", "限价单必须指定价格")
 
         # 获取账户

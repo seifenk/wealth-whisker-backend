@@ -8,12 +8,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.enums import AssetType, Interval, RiskLevel, RiskPreference, TrendSignal
+
 
 class AssetBase(BaseModel):
     """资产基础信息"""
     symbol: str
     name: str
-    asset_type: str
+    asset_type: AssetType
     exchange: Optional[str] = None
     currency: str = "USD"
 
@@ -23,7 +25,7 @@ class AssetResponse(BaseModel):
     id: UUID
     symbol: str
     name: str
-    asset_type: str
+    asset_type: AssetType
     exchange: Optional[str] = None
     currency: str
     is_active: bool
@@ -54,8 +56,8 @@ class AssetMetricResponse(BaseModel):
     change_7d: Optional[Decimal] = None
     volatility_30d: Optional[Decimal] = None
     sharpe_ratio: Optional[Decimal] = None
-    risk_level: Optional[str] = None
-    trend_signal: Optional[str] = None
+    risk_level: Optional[RiskLevel] = None
+    trend_signal: Optional[TrendSignal] = None
     confidence_score: Optional[Decimal] = None
     calculated_at: Optional[datetime] = None
 
@@ -72,7 +74,7 @@ class DashboardItemResponse(BaseModel):
     id: UUID
     symbol: str
     name: str
-    asset_type: str
+    asset_type: AssetType
     exchange: Optional[str] = None
     currency: str
     price: Optional[float] = None
@@ -80,8 +82,8 @@ class DashboardItemResponse(BaseModel):
     change_7d: Optional[float] = None
     volatility_30d: Optional[float] = None
     sharpe_ratio: Optional[float] = None
-    risk_level: Optional[str] = None
-    trend_signal: Optional[str] = None
+    risk_level: Optional[RiskLevel] = None
+    trend_signal: Optional[TrendSignal] = None
     confidence_score: Optional[float] = None
     # 技术指标摘要
     rsi_14: Optional[float] = None
@@ -95,8 +97,8 @@ class DashboardResponse(BaseModel):
     """看板响应"""
     items: List[DashboardItemResponse]
     total: int
-    asset_type_filter: Optional[str] = None
-    risk_preference: Optional[str] = None  # 'conservative', 'balanced', 'aggressive'
+    asset_type_filter: Optional[AssetType] = None
+    risk_preference: Optional[RiskPreference] = None
     sort_by: Optional[str] = None
 
 
@@ -112,7 +114,7 @@ class PerformanceMetricsResponse(BaseModel):
 
 class OHLCVQueryParams(BaseModel):
     """K线查询参数"""
-    interval: str = Field(default="1h", description="K线周期: 1m, 5m, 15m, 30m, 1h, 4h, 1d")
+    interval: Interval = Field(default=Interval.HOUR_1, description="K线周期")
     start_time: Optional[datetime] = Field(default=None, description="开始时间")
     end_time: Optional[datetime] = Field(default=None, description="结束时间")
     limit: int = Field(default=100, ge=1, le=1000, description="返回数量限制")

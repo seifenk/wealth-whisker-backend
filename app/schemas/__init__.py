@@ -1,6 +1,20 @@
 """
 Pydantic Schema 模块索引
 """
+from app.schemas.enums import (
+    AssetType,
+    OrderType,
+    OrderSide,
+    OrderStatus,
+    RiskLevel,
+    TrendSignal,
+    BacktestJobStatus,
+    RiskPreference,
+    Interval,
+    RebalanceFrequency,
+    Currency,
+    MAType,
+)
 from app.schemas.auth import (
     DisclaimerAccept,
     PasswordChange,
@@ -74,6 +88,19 @@ from app.schemas.research import (
 )
 
 __all__ = [
+    # Enums
+    "AssetType",
+    "OrderType",
+    "OrderSide",
+    "OrderStatus",
+    "RiskLevel",
+    "TrendSignal",
+    "BacktestJobStatus",
+    "RiskPreference",
+    "Interval",
+    "RebalanceFrequency",
+    "Currency",
+    "MAType",
     # Auth
     "DisclaimerAccept",
     "PasswordChange",
