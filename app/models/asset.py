@@ -35,6 +35,7 @@ class Asset(Base, TimestampMixin):
     metrics = relationship("AssetMetric", back_populates="asset")
     research_cards = relationship("ResearchCard", back_populates="asset")
     predictions = relationship("ModelPrediction", back_populates="asset")
+    calibration_logs = relationship("ModelCalibrationLog", back_populates="asset")
     positions = relationship("Position", back_populates="asset")
 
 

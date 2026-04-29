@@ -222,9 +222,12 @@ async def override_get_db(db_session: AsyncSession):
     async def _get_db_override():
         yield db_session
 
+    # 保存原有的覆盖
+    original_overrides = app.dependency_overrides.copy()
     app.dependency_overrides[get_db] = _get_db_override
     yield
-    app.dependency_overrides.clear()
+    # 恢复原有的覆盖，而不是清除所有
+    app.dependency_overrides = original_overrides
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -237,9 +240,12 @@ async def override_cache_service(redis_client: CacheService):
     def _get_cache_service_override():
         return redis_client
 
+    # 保存原有的覆盖
+    original_overrides = app.dependency_overrides.copy()
     app.dependency_overrides[get_cache_service] = _get_cache_service_override
     yield
-    app.dependency_overrides.clear()
+    # 恢复原有的覆盖，而不是清除所有
+    app.dependency_overrides = original_overrides
 
 
 # 工具函数

@@ -48,6 +48,7 @@ class ResearchService:
             select(AssetMetric)
             .where(AssetMetric.asset_id == asset_id)
             .order_by(desc(AssetMetric.calculated_at))
+            .limit(1)
         )
         metric = metric.scalar_one_or_none()
 
@@ -283,6 +284,7 @@ class PredictionService:
             select(AssetMetric)
             .where(AssetMetric.asset_id == asset_id)
             .order_by(desc(AssetMetric.calculated_at))
+            .limit(1)
         )
         metric = metric.scalar_one_or_none()
 

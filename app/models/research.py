@@ -78,6 +78,9 @@ class ModelCalibrationLog(Base):
     performance_after = Column(JSONB, nullable=True, comment='校准后性能JSON')
     notes = Column(Text, nullable=True, comment='备注说明')
 
+    # 关系
+    asset = relationship("Asset", back_populates="calibration_logs")
+
 
 class DisclaimerVersion(Base, TimestampMixin):
     """免责声明版本表"""

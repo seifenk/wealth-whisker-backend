@@ -1,5 +1,7 @@
 """
-研究结论与模型校准 API 路由
+研究结论与模型校准 API 路由（自动化版本）
+
+前端只需查询结果，后台自动执行生成和校准
 """
 from datetime import datetime, date
 from typing import Optional, Dict, Any
@@ -20,7 +22,6 @@ from app.schemas.research import (
     ModelPredictionResponse,
     PredictionListResponse,
     PredictionAccuracy,
-    PredictionCreate,
     CalibrationLogResponse,
     CalibrationLogListResponse,
     ModelVersionInfo,
@@ -38,7 +39,7 @@ from app.services.asset_service import get_latest_price
 router = APIRouter(prefix="/research")
 
 
-# ============ 研究结论卡片 ============
+# ============ 研究结论卡片（查询接口） ============
 
 @router.get(
     "/cards",
@@ -111,33 +112,7 @@ async def get_research_card(
     return ResearchCardResponse(**card_dict)
 
 
-@router.post(
-    "/cards/generate/{asset_id}",
-    summary="生成研究结论",
-    response_model=ResearchCardResponse,
-    description="为指定资产生成研究结论"
-)
-async def generate_research_card(
-    asset_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """生成研究结论"""
-    try:
-        asset_uuid = UUID(asset_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="无效的资产ID")
-
-    card = await ResearchService.generate_research_card(db, asset_uuid)
-    card_dict = ResearchCardResponse.model_validate(card).model_dump()
-    if card.asset:
-        card_dict["asset_symbol"] = card.asset.symbol
-        card_dict["asset_name"] = card.asset.name
-
-    return ResearchCardResponse(**card_dict)
-
-
-# ============ 模型预测 ============
+# ============ 模型预测（查询接口） ============
 
 @router.get(
     "/predictions",
@@ -174,36 +149,6 @@ async def list_predictions(
         items.append(ModelPredictionResponse(**pred_dict))
 
     return PredictionListResponse(items=items, total=len(items))
-
-
-@router.post(
-    "/predictions",
-    summary="创建预测",
-    response_model=ModelPredictionResponse,
-    description="创建新的模型预测"
-)
-async def create_prediction(
-    data: PredictionCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """创建预测"""
-    try:
-        asset_uuid = UUID(data.asset_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="无效的资产ID")
-
-    prediction = await PredictionService.create_prediction(
-        db=db, asset_id=asset_uuid, prediction_type=data.prediction_type,
-        target_date=data.target_date, model_version=data.model_version
-    )
-
-    pred_dict = ModelPredictionResponse.model_validate(prediction).model_dump()
-    if prediction.asset:
-        pred_dict["asset_symbol"] = prediction.asset.symbol
-        pred_dict["asset_name"] = prediction.asset.name
-
-    return ModelPredictionResponse(**pred_dict)
 
 
 @router.get(
@@ -264,34 +209,6 @@ async def list_calibration_logs(
         items.append(CalibrationLogResponse(**log_dict))
 
     return CalibrationLogListResponse(items=items, total=len(items))
-
-
-@router.post(
-    "/calibration/{asset_id}",
-    summary="触发校准",
-    description="手动触发模型校准"
-)
-async def trigger_calibration(
-    asset_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """触发校准"""
-    try:
-        asset_uuid = UUID(asset_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="无效的资产ID")
-
-    log = await CalibrationService.check_and_calibrate(db, asset_uuid)
-    if not log:
-        return None
-
-    log_dict = CalibrationLogResponse.model_validate(log).model_dump()
-    if log.asset:
-        log_dict["asset_symbol"] = log.asset.symbol
-        log_dict["asset_name"] = log.asset.name
-
-    return CalibrationLogResponse(**log_dict)
 
 
 # ============ 模型版本 ============
