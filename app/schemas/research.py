@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.schemas.enums import RiskLevel
+from app.schemas.enums import RiskLevel, PredictionType, CalibrationType
 
 
 # ============ 研究结论卡片 ============
@@ -64,7 +64,7 @@ class ModelPredictionResponse(BaseModel):
     asset_symbol: Optional[str] = None
     asset_name: Optional[str] = None
     model_version: str
-    prediction_type: str
+    prediction_type: PredictionType
     predicted_at: datetime
     target_date: date
     predicted_value: Optional[Decimal] = None
@@ -96,7 +96,7 @@ class PredictionAccuracy(BaseModel):
 class PredictionCreate(BaseModel):
     """创建预测"""
     asset_id: str
-    prediction_type: str = Field(default="price", description="预测类型: price, trend, volatility")
+    prediction_type: PredictionType = Field(default=PredictionType.PRICE, description="预测类型")
     target_date: date
     model_version: str = Field(default="v1.0")
 
@@ -110,7 +110,7 @@ class CalibrationLogResponse(BaseModel):
     asset_symbol: Optional[str] = None
     asset_name: Optional[str] = None
     model_type: str
-    calibration_type: Optional[str] = None
+    calibration_type: Optional[CalibrationType] = None
     triggered_at: datetime
     completed_at: Optional[datetime] = None
     before_params: Optional[Dict[str, Any]] = None

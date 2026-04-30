@@ -28,6 +28,7 @@ from app.schemas.research import (
     ModelVersionListResponse,
     AssetAnalysisResponse
 )
+from app.schemas.enums import PredictionType
 from app.services.research_service import (
     ResearchService,
     PredictionService,
@@ -122,7 +123,7 @@ async def get_research_card(
 )
 async def list_predictions(
     asset_id: Optional[str] = Query(default=None),
-    prediction_type: Optional[str] = Query(default=None),
+    prediction_type: Optional[PredictionType] = Query(default=None),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -137,7 +138,7 @@ async def list_predictions(
             raise HTTPException(status_code=400, detail="无效的资产ID")
 
     predictions = await PredictionService.get_predictions(
-        db=db, asset_id=asset_uuid, prediction_type=prediction_type, skip=skip, limit=limit
+        db=db, asset_id=asset_uuid, prediction_type=prediction_type.value if prediction_type else None, skip=skip, limit=limit
     )
 
     items = []

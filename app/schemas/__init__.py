@@ -14,6 +14,8 @@ from app.schemas.enums import (
     RebalanceFrequency,
     Currency,
     MAType,
+    PredictionType,
+    CalibrationType,
 )
 from app.schemas.auth import (
     DisclaimerAccept,
@@ -101,6 +103,8 @@ __all__ = [
     "RebalanceFrequency",
     "Currency",
     "MAType",
+    "PredictionType",
+    "CalibrationType",
     # Auth
     "DisclaimerAccept",
     "PasswordChange",

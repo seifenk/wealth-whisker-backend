@@ -93,3 +93,18 @@ class MAType(str, Enum):
     """均线类型"""
     SMA = "SMA"  # 简单移动平均
     EMA = "EMA"  # 指数移动平均
+
+
+class PredictionType(str, Enum):
+    """预测类型"""
+    PRICE = "price"              # 价格预测
+    PRICE_SHORT = "price_short"  # 短期价格预测
+    PRICE_MID = "price_mid"      # 中期价格预测
+    TREND = "trend"              # 趋势预测
+    VOLATILITY = "volatility"    # 波动率预测
+
+
+class CalibrationType(str, Enum):
+    """校准类型"""
+    SCHEDULED = "scheduled"          # 定时校准
+    DEVIATION_TRIGGERED = "deviation_triggered"  # 偏差触发校准
