@@ -68,6 +68,68 @@ class IndicatorCalculator:
         return round(rsi, 2)
 
     @staticmethod
+    def calculate_kdj(
+        prices: List[float],
+        period: int = 9,
+    ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """
+        KDJ随机指标
+
+        Args:
+            prices: 价格序列（需要包含high和low，简化版用close近似）
+            period: 计算周期（默认9）
+
+        Returns:
+            (k_value, d_value, j_value)
+            K值：快速指标，反应灵敏
+            D值：慢速指标，K的平滑
+            J值：J=3K-2D，超前指标
+        """
+        if len(prices) < period:
+            return None, None, None
+
+        # 简化版：使用收盘价近似计算
+        # 实际应用中应使用 (close, low, high) 三元组
+        # 这里假设 prices 就是 close 价格序列
+        # 用 close 近似 high/low（实际场景应有完整OHLC数据）
+
+        rsv_values = []
+        for i in range(period - 1, len(prices)):
+            # 计算最近period个周期的最高最低价
+            window = prices[i - period + 1:i + 1]
+            highest = max(window)
+            lowest = min(window)
+            current = prices[i]
+
+            # RSV = (Close - Lowest) / (Highest - Lowest) * 100
+            if highest == lowest:
+                rsv = 50.0  # 无波动时取中值
+            else:
+                rsv = (current - lowest) / (highest - lowest) * 100
+            rsv_values.append(rsv)
+
+        if not rsv_values:
+            return None, None, None
+
+        # 计算K值（首次用50）
+        k_values = [50.0]
+        for rsv in rsv_values[1:]:
+            k = k_values[-1] * 2 / 3 + rsv * 1 / 3
+            k_values.append(k)
+
+        # 计算D值（首次用50）
+        d_values = [50.0]
+        for k in k_values[1:]:
+            d = d_values[-1] * 2 / 3 + k * 1 / 3
+            d_values.append(d)
+
+        # 计算J值
+        j_values = [3 * k - 2 * d for k, d in zip(k_values, d_values)]
+
+        # 返回最新值
+        return round(k_values[-1], 2), round(d_values[-1], 2), round(j_values[-1], 2)
+
+    @staticmethod
     def calculate_macd(
         prices: List[float],
         fast_period: int = 12,
@@ -134,6 +196,214 @@ class IndicatorCalculator:
         lower = middle - std_dev * std
 
         return round(middle, 4), round(upper, 4), round(lower, 4)
+
+
+class SupportResistanceCalculator:
+    """支撑阻力位计算器"""
+
+    @staticmethod
+    def find_support_levels(
+        prices: List[float],
+        window: int = 20,
+        min_touches: int = 2,
+    ) -> List[dict]:
+        """
+        识别支撑位
+
+        Args:
+            prices: 价格序列
+            window: 搜索窗口大小
+            min_touches: 最少触及次数（有效性要求）
+
+        Returns:
+            支撑位列表，每个元素包含 {price, strength, touches}
+        """
+        if len(prices) < window:
+            return []
+
+        support_levels = []
+
+        # 识别局部最小值作为潜在支撑位
+        for i in range(window, len(prices) - window):
+            # 检查是否为局部最小值
+            left_window = prices[i - window:i]
+            right_window = prices[i:i + window]
+            current = prices[i]
+
+            if current <= min(left_window) and current <= min(right_window):
+                # 这是一个局部最小值
+                support_price = current
+
+                # 计算触及次数（价格接近该支撑位的次数）
+                tolerance = support_price * 0.02  # 2%容差
+                touches = sum(1 for p in prices if abs(p - support_price) <= tolerance)
+
+                if touches >= min_touches:
+                    # 计算强度（触及次数越多越强）
+                    strength = min(touches, 5)
+
+                    support_levels.append({
+                        "price": round(support_price, 4),
+                        "strength": strength,
+                        "touches": touches
+                    })
+
+        # 按强度排序，保留前5个最强支撑位
+        support_levels.sort(key=lambda x: x["strength"], reverse=True)
+        return support_levels[:5]
+
+    @staticmethod
+    def find_resistance_levels(
+        prices: List[float],
+        window: int = 20,
+        min_touches: int = 2,
+    ) -> List[dict]:
+        """
+        识别阻力位
+
+        Args:
+            prices: 价格序列
+            window: 搜索窗口大小
+            min_touches: 最少触及次数
+
+        Returns:
+            阻力位列表，每个元素包含 {price, strength, touches}
+        """
+        if len(prices) < window:
+            return []
+
+        resistance_levels = []
+
+        # 识别局部最大值作为潜在阻力位
+        for i in range(window, len(prices) - window):
+            left_window = prices[i - window:i]
+            right_window = prices[i:i + window]
+            current = prices[i]
+
+            if current >= max(left_window) and current >= max(right_window):
+                resistance_price = current
+
+                # 计算触及次数
+                tolerance = resistance_price * 0.02
+                touches = sum(1 for p in prices if abs(p - resistance_price) <= tolerance)
+
+                if touches >= min_touches:
+                    strength = min(touches, 5)
+
+                    resistance_levels.append({
+                        "price": round(resistance_price, 4),
+                        "strength": strength,
+                        "touches": touches
+                    })
+
+        # 按强度排序
+        resistance_levels.sort(key=lambda x: x["strength"], reverse=True)
+        return resistance_levels[:5]
+
+    @staticmethod
+    def calculate_break_probability(
+        current_price: float,
+        target_level: float,
+        volatility: float,
+        days: int = 5,
+    ) -> float:
+        """
+        计算突破/跌破概率
+
+        基于波动率和距离估算突破概率
+
+        Args:
+            current_price: 当前价格
+            target_level: 目标支撑/阻力位价格
+            volatility: 年化波动率（百分比）
+            days: 预测天数
+
+        Returns:
+            突破概率（0-100）
+        """
+        if volatility <= 0 or days <= 0:
+            return 0.0
+
+        # 计算距离（百分比）
+        distance = abs(target_level - current_price) / current_price * 100
+
+        # 日波动率
+        daily_volatility = volatility / math.sqrt(252)
+
+        # 预测期内预期波动范围
+        expected_range = daily_volatility * math.sqrt(days) * 100
+
+        # 简化概率估算：距离越小，波动率越大，突破概率越高
+        if expected_range <= 0:
+            return 0.0
+
+        # 使用正态分布近似
+        # Z-score = 距离 / 预期波动范围
+        z_score = distance / expected_range
+
+        # 突破概率 = 1 - P(价格在范围内)
+        # 简化：假设正态分布，使用Z值估算
+        # Z < 1: 高概率(>30%), Z < 2: 中概率(>5%), Z > 2: 低概率
+        if z_score < 0.5:
+            probability = 60.0
+        elif z_score < 1.0:
+            probability = 40.0
+        elif z_score < 1.5:
+            probability = 25.0
+        elif z_score < 2.0:
+            probability = 10.0
+        else:
+            probability = 5.0
+
+        return round(probability, 1)
+
+    @staticmethod
+    def get_current_position(
+        current_price: float,
+        support_levels: List[dict],
+        resistance_levels: List[dict],
+    ) -> str:
+        """
+        判断当前价格相对于支撑阻力位的位置
+
+        Args:
+            current_price: 当前价格
+            support_levels: 支撑位列表
+            resistance_levels: 阻力位列表
+
+        Returns:
+            'above_resistance' | 'below_support' | 'near_support' | 'near_resistance' | 'normal'
+        """
+        if not support_levels and not resistance_levels:
+            return "normal"
+
+        # 获取最近的支撑位
+        nearest_support = None
+        for level in support_levels:
+            if level["price"] < current_price:
+                nearest_support = level["price"]
+                break
+
+        # 获取最近的阻力位
+        nearest_resistance = None
+        for level in resistance_levels:
+            if level["price"] > current_price:
+                nearest_resistance = level["price"]
+                break
+
+        tolerance = current_price * 0.02  # 2%容差
+
+        # 判断位置
+        if nearest_resistance and current_price >= nearest_resistance:
+            return "above_resistance"
+        elif nearest_support and current_price <= nearest_support:
+            return "below_support"
+        elif nearest_resistance and abs(current_price - nearest_resistance) <= tolerance:
+            return "near_resistance"
+        elif nearest_support and abs(current_price - nearest_support) <= tolerance:
+            return "near_support"
+        else:
+            return "normal"
 
 
 class RiskCalculator:
@@ -461,6 +731,310 @@ class TrendSignalCalculator:
         return round(min(confidence, 0.95), 2)  # 最高不超过0.95
 
 
+class TechnicalStrengthCalculator:
+    """技术面强度评分器"""
+
+    @staticmethod
+    def calculate_technical_strength(
+        prices: List[float],
+        metrics: Optional[dict] = None,
+    ) -> int:
+        """
+        计算技术面强度评分（1-5星）
+
+        评分维度：
+        - MA趋势强度（权重30%）
+        - RSI/MACD/KDJ一致性（权重30%）
+        - 价格位置（布林带）（权重20%）
+        - 趋势信号强度（权重20%）
+
+        Args:
+            prices: 价格序列
+            metrics: 已计算的指标字典（可选，若提供则复用）
+
+        Returns:
+            1-5星评级
+        """
+        if len(prices) < 20:
+            return 1  # 数据不足，最低评分
+
+        # 计算或复用指标
+        if metrics is None:
+            metrics = MetricsCalculator.calculate_all_metrics(prices)
+
+        score = 0.0
+
+        # 1. MA趋势强度（30%权重）
+        sma_5 = IndicatorCalculator.calculate_sma(prices, 5)
+        sma_20 = IndicatorCalculator.calculate_sma(prices, 20)
+        current_price = prices[-1]
+
+        if sma_5 and sma_20:
+            # MA多头排列加分
+            if sma_5 > sma_20:
+                ma_strength = (sma_5 - sma_20) / sma_20 * 100
+                if ma_strength > 2:
+                    score += 30
+                elif ma_strength > 1:
+                    score += 25
+                else:
+                    score += 15
+            elif sma_5 < sma_20:
+                ma_strength = (sma_20 - sma_5) / sma_20 * 100
+                if ma_strength > 2:
+                    score += 5  # 强空头排列，低分
+                else:
+                    score += 10
+            else:
+                score += 15
+
+            # 价格在MA之上加分
+            if current_price > sma_20:
+                score += 10
+            elif current_price > sma_5:
+                score += 5
+
+        # 2. RSI/MACD/KDJ一致性（30%权重）
+        rsi = metrics.get("rsi_14") or IndicatorCalculator.calculate_rsi(prices)
+        macd, signal, hist = metrics.get("macd"), metrics.get("macd_signal"), metrics.get("macd_histogram")
+        if macd is None:
+            macd, signal, hist = IndicatorCalculator.calculate_macd(prices)
+        k, d, j = IndicatorCalculator.calculate_kdj(prices)
+
+        consistent_signals = 0
+        total_signals = 0
+
+        # RSI信号
+        if rsi:
+            total_signals += 1
+            if rsi > 50:
+                consistent_signals += 1  # 偏强
+            elif rsi < 30:
+                consistent_signals += 0.5  # 超卖可能反弹
+
+        # MACD信号
+        if hist:
+            total_signals += 1
+            if hist > 0:
+                consistent_signals += 1  # 金叉/上升
+
+        # KDJ信号
+        if k and d:
+            total_signals += 1
+            if k > d and j > k:
+                consistent_signals += 1  # J线领先，强势
+            elif k > d:
+                consistent_signals += 0.5
+
+        if total_signals > 0:
+            consistency_ratio = consistent_signals / total_signals
+            score += consistency_ratio * 30
+
+        # 3. 布林带位置（20%权重）
+        middle, upper, lower = metrics.get("bollinger_middle"), metrics.get("bollinger_upper"), metrics.get("bollinger_lower")
+        if middle is None:
+            middle, upper, lower = IndicatorCalculator.calculate_bollinger_bands(prices)
+
+        if middle and upper and lower:
+            # 价格在中轨之上
+            if current_price > middle:
+                position_score = (current_price - middle) / (upper - middle) * 10
+                score += min(position_score, 15)
+            else:
+                position_score = (middle - current_price) / (middle - lower) * 5
+                score += max(5 - position_score, 2)
+
+        # 4. 趋势信号强度（20%权重）
+        trend_signal = metrics.get("trend_signal") or TrendSignalCalculator.calculate_trend_signal(prices)
+        if trend_signal == "bullish":
+            score += 20
+        elif trend_signal == "neutral":
+            score += 10
+        else:
+            score += 5
+
+        # 映射到1-5星
+        if score >= 80:
+            return 5
+        elif score >= 65:
+            return 4
+        elif score >= 50:
+            return 3
+        elif score >= 35:
+            return 2
+        else:
+            return 1
+
+    @staticmethod
+    def calculate_signal_consistency(
+        prices: List[float],
+        metrics: Optional[dict] = None,
+    ) -> float:
+        """
+        计算信号一致性百分比
+
+        检查多个技术指标是否指向同一方向
+
+        Args:
+            prices: 价格序列
+            metrics: 已计算的指标字典
+
+        Returns:
+            一致性百分比（0-100）
+        """
+        if len(prices) < 20:
+            return 30.0
+
+        if metrics is None:
+            metrics = MetricsCalculator.calculate_all_metrics(prices)
+
+        # 获取趋势信号作为基准方向
+        trend_signal = metrics.get("trend_signal") or TrendSignalCalculator.calculate_trend_signal(prices)
+
+        # 判断各指标与趋势的一致性
+        signals = []
+
+        # MA趋势
+        sma_5 = IndicatorCalculator.calculate_sma(prices, 5)
+        sma_20 = IndicatorCalculator.calculate_sma(prices, 20)
+        if sma_5 and sma_20:
+            if sma_5 > sma_20:
+                signals.append("bullish")
+            elif sma_5 < sma_20:
+                signals.append("bearish")
+            else:
+                signals.append("neutral")
+
+        # RSI
+        rsi = metrics.get("rsi_14") or IndicatorCalculator.calculate_rsi(prices)
+        if rsi:
+            if rsi > 60:
+                signals.append("bullish")
+            elif rsi < 40:
+                signals.append("bearish")
+            else:
+                signals.append("neutral")
+
+        # MACD
+        macd, signal_line, hist = metrics.get("macd"), metrics.get("macd_signal"), metrics.get("macd_histogram")
+        if hist:
+            if hist > 0:
+                signals.append("bullish")
+            elif hist < 0:
+                signals.append("bearish")
+            else:
+                signals.append("neutral")
+
+        # KDJ
+        k, d, j = IndicatorCalculator.calculate_kdj(prices)
+        if k and d and j:
+            if j > k and k > d:
+                signals.append("bullish")
+            elif j < k and k < d:
+                signals.append("bearish")
+            else:
+                signals.append("neutral")
+
+        # 布林带位置
+        current_price = prices[-1]
+        middle = metrics.get("bollinger_middle")
+        if middle:
+            if current_price > middle:
+                signals.append("bullish")
+            elif current_price < middle:
+                signals.append("bearish")
+            else:
+                signals.append("neutral")
+
+        if not signals:
+            return 30.0
+
+        # 计算一致性
+        bullish_count = sum(1 for s in signals if s == "bullish")
+        bearish_count = sum(1 for s in signals if s == "bearish")
+        neutral_count = sum(1 for s in signals if s == "neutral")
+
+        total = len(signals)
+
+        # 一致性 = 主导方向的占比
+        if trend_signal == "bullish":
+            consistency = (bullish_count / total) * 100
+        elif trend_signal == "bearish":
+            consistency = (bearish_count / total) * 100
+        else:
+            consistency = (neutral_count / total) * 100 + 30  # 中性时加分
+
+        return round(min(consistency, 95), 1)  # 最高不超过95%
+
+    @staticmethod
+    def get_technical_signals_detail(
+        prices: List[float],
+        metrics: Optional[dict] = None,
+    ) -> dict:
+        """
+        获取技术信号详情（用于前端展示）
+
+        Args:
+            prices: 价格序列
+            metrics: 已计算的指标字典
+
+        Returns:
+            技术信号详情字典
+        """
+        if len(prices) < 20:
+            return {}
+
+        if metrics is None:
+            metrics = MetricsCalculator.calculate_all_metrics(prices)
+
+        # MA趋势
+        sma_5 = IndicatorCalculator.calculate_sma(prices, 5)
+        sma_20 = IndicatorCalculator.calculate_sma(prices, 20)
+        ma_trend = "neutral"
+        if sma_5 and sma_20:
+            if sma_5 > sma_20 * 1.01:  # 1%阈值
+                ma_trend = "bullish"
+            elif sma_5 < sma_20 * 0.99:
+                ma_trend = "bearish"
+
+        # RSI状态
+        rsi = metrics.get("rsi_14") or IndicatorCalculator.calculate_rsi(prices)
+        rsi_status = "normal"
+        if rsi:
+            if rsi > 70:
+                rsi_status = "overbought"
+            elif rsi < 30:
+                rsi_status = "oversold"
+
+        # MACD信号
+        macd, signal_line, hist = metrics.get("macd"), metrics.get("macd_signal"), metrics.get("macd_histogram")
+        if hist is None:
+            macd, signal_line, hist = IndicatorCalculator.calculate_macd(prices)
+        macd_signal = "neutral"
+        if hist:
+            if hist > 0:
+                macd_signal = "bullish"
+            elif hist < 0:
+                macd_signal = "bearish"
+
+        # 成交量趋势（简化：用价格波动代替）
+        volatility = metrics.get("volatility_30d")
+        volume_trend = "stable"
+        if volatility:
+            if volatility > 40:
+                volume_trend = "increasing"
+            elif volatility < 15:
+                volume_trend = "decreasing"
+
+        return {
+            "ma_trend": ma_trend,
+            "rsi_status": rsi_status,
+            "rsi_value": rsi,
+            "macd_signal": macd_signal,
+            "volume_trend": volume_trend,
+        }
+
+
 class MetricsCalculator:
     """综合指标计算器"""
 
@@ -532,6 +1106,33 @@ class MetricsCalculator:
         metrics["bollinger_middle"] = middle
         metrics["bollinger_upper"] = upper
         metrics["bollinger_lower"] = lower
+
+        # KDJ指标
+        k, d, j = IndicatorCalculator.calculate_kdj(prices)
+        metrics["kdj_k"] = k
+        metrics["kdj_d"] = d
+        metrics["kdj_j"] = j
+
+        # 支撑阻力位
+        support_levels = SupportResistanceCalculator.find_support_levels(prices)
+        resistance_levels = SupportResistanceCalculator.find_resistance_levels(prices)
+        metrics["support_levels"] = [level["price"] for level in support_levels]
+        metrics["resistance_levels"] = [level["price"] for level in resistance_levels]
+        metrics["support_levels_detail"] = support_levels
+        metrics["resistance_levels_detail"] = resistance_levels
+
+        # 技术面强度评分
+        metrics["technical_strength"] = TechnicalStrengthCalculator.calculate_technical_strength(prices, metrics)
+        metrics["signal_consistency"] = TechnicalStrengthCalculator.calculate_signal_consistency(prices, metrics)
+
+        # 技术信号详情
+        metrics["technical_signals"] = TechnicalStrengthCalculator.get_technical_signals_detail(prices, metrics)
+
+        # 当前价格相对于支撑阻力位的位置
+        current_price = prices[-1]
+        metrics["sr_position"] = SupportResistanceCalculator.get_current_position(
+            current_price, support_levels, resistance_levels
+        )
 
         # 格式化（保留精度，处理None）
         for key, value in metrics.items():

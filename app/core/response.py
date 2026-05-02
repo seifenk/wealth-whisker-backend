@@ -56,6 +56,16 @@ class ResponseWrapper:
         }
 
 
+def success_response(data: Any = None, msg: str = "成功", code: int = ResponseCode.SUCCESS) -> dict:
+    """成功响应快捷函数"""
+    return ResponseWrapper.success(data=data, msg=msg, code=code)
+
+
+def error_response(msg: str, code: int = ResponseCode.FAIL, data: Any = None) -> dict:
+    """错误响应快捷函数"""
+    return ResponseWrapper.error(msg=msg, code=code, data=data)
+
+
 class UnifiedJSONResponse(JSONResponse):
     """统一格式的 JSON 响应 - 自动包装返回数据"""
 

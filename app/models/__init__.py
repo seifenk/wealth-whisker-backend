@@ -13,6 +13,7 @@ from app.models.research import (
     UserDisclaimerAcceptance,
     RiskDisclosureLog,
 )
+from app.models.news import NewsArticle, SentimentSnapshot, MacroIndicator
 
 __all__ = [
     # User models
@@ -42,4 +43,8 @@ __all__ = [
     "DisclaimerVersion",
     "UserDisclaimerAcceptance",
     "RiskDisclosureLog",
+    # News models
+    "NewsArticle",
+    "SentimentSnapshot",
+    "MacroIndicator",
 ]

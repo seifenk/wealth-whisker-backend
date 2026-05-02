@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     METALS_API_KEY: Optional[str] = None
     METALS_API_URL: str = "https://api.metals.live"
 
+    # News APIs (新闻数据源)
+    CRYPTOPANIC_API_KEY: Optional[str] = None  # CryptoPanic加密货币新闻API
+    NEWSAPI_KEY: Optional[str] = None          # NewsAPI.org通用新闻API
+
     # Data Sync
     DATA_SYNC_INTERVAL_MINUTES: int = 60
     CRYPTO_SYNC_INTERVAL_MINUTES: int = 15
@@ -75,6 +79,15 @@ class Settings(BaseSettings):
     CALIBRATION_THRESHOLD: float = 0.05
     CRYPTO_CALIBRATION_INTERVAL_HOURS: int = 4
     STOCK_CALIBRATION_SCHEDULE: str = "17:00"
+
+    # LLM Integration
+    LLM_API_BASE: Optional[str] = None  # API基础URL（如https://api.openai.com/v1）
+    LLM_API_KEY: Optional[str] = None   # API密钥
+    LLM_MODEL: str = "gpt-4o-mini"      # 模型名称（默认使用轻量模型）
+    LLM_TIMEOUT: int = 30               # 请求超时（秒）
+    LLM_MAX_TOKENS: int = 1000          # 最大输出token数
+    LLM_TEMPERATURE: float = 0.7        # 温度参数（创意性）
+    LLM_ENABLED: bool = False           # 是否启用LLM功能（默认关闭）
 
     # CORS
     CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000", "http://localhost:8080"]

@@ -81,7 +81,7 @@ async def verify_actuals_update():
         prediction = ModelPrediction(
             asset_id=asset.id,
             model_version="test_v1",
-            prediction_type="price_test",
+            prediction_type="price_short",  # 使用有效的枚举值
             target_date=date.today() - timedelta(days=1),
             predicted_value=Decimal("100.0"),
         )

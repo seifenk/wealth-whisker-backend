@@ -24,6 +24,11 @@ from app.core.security import get_password_hash
 from app.main import app
 from app.models.base import Base
 from app.models.user import User, UserSettings
+from app.models.asset import Asset, OHLCV, AssetMetric
+from app.models.strategy import StrategyTemplate, UserStrategy, BacktestJob, BacktestResult
+from app.models.paper_trading import PaperAccount, Position, Order, Transaction, AccountSnapshot
+from app.models.research import ResearchCard, ModelPrediction, ModelCalibrationLog, DisclaimerVersion
+from app.models.news import NewsArticle, SentimentSnapshot, MacroIndicator
 from app.services.cache_service import CacheService
 
 
@@ -69,8 +74,10 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     - 测试前清理所有数据
     - 测试后回滚所有更改
     """
-    # 创建所有表
+    # 先清理所有表（确保测试环境干净）
     async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        # 再创建所有表
         await conn.run_sync(Base.metadata.create_all)
 
     # 创建会话

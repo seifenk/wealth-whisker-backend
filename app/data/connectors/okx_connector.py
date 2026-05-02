@@ -247,16 +247,22 @@ class OKXConnector(BaseConnector):
         try:
             ticker = await exchange.fetch_ticker(symbol)
 
+            # 安全处理 None 值
+            last_price = ticker.get('last')
+            if last_price is None:
+                logger.warning(f"OKX ticker last price is None for {symbol}")
+                last_price = 0
+
             return TickerData(
                 symbol=symbol,
-                last_price=Decimal(str(ticker['last'])),
-                bid_price=Decimal(str(ticker.get('bid', 0) or 0)),
-                ask_price=Decimal(str(ticker.get('ask', 0) or 0)),
-                high_24h=Decimal(str(ticker.get('high', 0) or 0)),
-                low_24h=Decimal(str(ticker.get('low', 0) or 0)),
-                volume_24h=Decimal(str(ticker.get('baseVolume', 0) or 0)),
-                change_24h=Decimal(str(ticker.get('percentage', 0) or 0)),
-                timestamp=datetime.fromtimestamp(ticker['timestamp'] / 1000, tz=timezone.utc),
+                last_price=Decimal(str(last_price)),
+                bid_price=Decimal(str(ticker.get('bid') or 0)),
+                ask_price=Decimal(str(ticker.get('ask') or 0)),
+                high_24h=Decimal(str(ticker.get('high') or 0)),
+                low_24h=Decimal(str(ticker.get('low') or 0)),
+                volume_24h=Decimal(str(ticker.get('baseVolume') or 0)),
+                change_24h=Decimal(str(ticker.get('percentage') or 0)),
+                timestamp=datetime.fromtimestamp((ticker.get('timestamp') or 0) / 1000, tz=timezone.utc) if ticker.get('timestamp') else datetime.now(timezone.utc),
             )
 
         except ccxt.NetworkError as e:

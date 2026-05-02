@@ -108,3 +108,64 @@ class CalibrationType(str, Enum):
     """校准类型"""
     SCHEDULED = "scheduled"          # 定时校准
     DEVIATION_TRIGGERED = "deviation_triggered"  # 偏差触发校准
+
+
+class InvestmentAction(str, Enum):
+    """投资决策"""
+    STRONG_BUY = "strong_buy"    # 强烈买入
+    BUY = "buy"                  # 买入
+    HOLD = "hold"                # 观望
+    SELL = "sell"                # 卖出
+    STRONG_SELL = "strong_sell"  # 强烈卖出
+
+
+class ConsistencyStatus(str, Enum):
+    """维度一致性状态"""
+    ALIGNED = "aligned"      # 一致（同向）
+    DIVERGED = "diverged"    # 背离（反向）
+    NEUTRAL = "neutral"      # 中性
+
+
+class ReasoningSource(str, Enum):
+    """依据来源"""
+    TECHNICAL = "technical"      # 技术面
+    NEWS = "news"                # 消息面
+    FUNDAMENTAL = "fundamental"  # 基本面
+
+
+class SuitableForTag(str, Enum):
+    """适合人群标签"""
+    CONSERVATIVE = "conservative"   # 保守型
+    BALANCED = "balanced"           # 平衡型
+    AGGRESSIVE = "aggressive"       # 激进型
+    NOVICE = "novice"               # 新手
+    INTERMEDIATE = "intermediate"   # 中级
+    EXPERT = "expert"               # 专家
+
+
+class SentimentType(str, Enum):
+    """情感类型"""
+    POSITIVE = "positive"   # 正面/利好
+    NEGATIVE = "negative"   # 负面/利空
+    NEUTRAL = "neutral"     # 中性
+
+
+class RSIStatus(str, Enum):
+    """RSI状态"""
+    OVERBOUGHT = "overbought"  # 超买
+    OVERSOLD = "oversold"      # 超卖
+    NORMAL = "normal"          # 正常
+
+
+class VolumeTrend(str, Enum):
+    """成交量趋势"""
+    INCREASING = "increasing"  # 放大
+    DECREASING = "decreasing"  # 缩小
+    STABLE = "stable"          # 稳定
+
+
+class ImpactType(str, Enum):
+    """影响类型"""
+    POSITIVE = "positive"   # 正面影响
+    NEGATIVE = "negative"   # 负面影响
+    NEUTRAL = "neutral"     # 中性影响

@@ -45,7 +45,6 @@ router = APIRouter(prefix="/research")
 @router.get(
     "/cards",
     summary="获取研究结论列表",
-    response_model=ResearchCardListResponse,
     description="获取AI生成的资产研究结论卡片列表（游客可访问）"
 )
 async def list_research_cards(
@@ -70,47 +69,48 @@ async def list_research_cards(
 
     items = []
     for card in cards:
-        card_dict = ResearchCardResponse.model_validate(card).model_dump()
-        if card.asset:
-            card_dict["asset_symbol"] = card.asset.symbol
-            card_dict["asset_name"] = card.asset.name
-        items.append(ResearchCardResponse(**card_dict))
+        # 使用新方法构建完整响应（包含scores、decision等）
+        card_response = await ResearchService._build_response_from_db_card(card, db)
+        items.append(card_response)
 
-    return ResearchCardListResponse(items=items, total=len(items))
+    return {"items": items, "total": len(items)}
 
 
 @router.get(
-    "/cards/{card_id}",
-    summary="获取研究结论详情",
-    response_model=ResearchCardResponse,
-    description="获取单个研究结论卡片详情"
+    "/cards/{asset_id}",
+    summary="获取资产研究结论",
+    description="获取资产的实时研究结论卡片。默认返回缓存数据（快速响应），force_refresh=true时实时计算（约2分钟）"
 )
-async def get_research_card(
-    card_id: str,
+async def get_research_card_by_asset(
+    asset_id: str,
+    force_refresh: bool = Query(default=False, description="强制刷新，获取最新数据"),
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
-    """获取研究结论详情"""
+    """获取资产研究结论
+
+    - 默认：返回数据库缓存（2小时内有效），秒级响应
+    - force_refresh=true：实时计算技术面+消息面，约2分钟
+    """
     try:
-        card_uuid = UUID(card_id)
+        asset_uuid = UUID(asset_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="无效的卡片ID")
+        raise HTTPException(status_code=400, detail="无效的资产ID")
 
-    card = await ResearchService.get_research_card(db, card_uuid)
-    if not card:
-        raise HTTPException(status_code=404, detail="研究结论不存在")
+    # 生成/获取研究卡片（带缓存逻辑）
+    card = await ResearchService.generate_research_card(
+        db, asset_uuid, force_refresh=force_refresh
+    )
 
-    card_dict = ResearchCardResponse.model_validate(card).model_dump()
-    if card.asset:
-        card_dict["asset_symbol"] = card.asset.symbol
-        card_dict["asset_name"] = card.asset.name
+    # 从数据库卡片构建完整响应
+    response = await ResearchService._build_response_from_db_card(card, db)
 
     await DisclaimerService.log_risk_disclosure(
         db=db, user_id=current_user.id if current_user else None,
         page="research_card", disclosure_type="prediction_risk"
     )
 
-    return ResearchCardResponse(**card_dict)
+    return response
 
 
 # ============ 模型预测（查询接口） ============
@@ -235,8 +235,7 @@ async def list_model_versions(
 @router.get(
     "/analysis/{asset_id}",
     summary="获取资产综合分析",
-    response_model=AssetAnalysisResponse,
-    description="获取资产综合分析报告"
+    description="获取资产综合分析报告，包含研究结论卡片、预测数据和免责声明（游客可访问）"
 )
 async def get_asset_analysis(
     asset_id: str,
@@ -256,14 +255,9 @@ async def get_asset_analysis(
 
     current_price = await get_latest_price(db, asset_uuid)
 
-    cards = await ResearchService.get_research_cards(db, asset_id=asset_uuid, limit=1)
-    research_card = None
-    if cards:
-        card_dict = ResearchCardResponse.model_validate(cards[0]).model_dump()
-        if cards[0].asset:
-            card_dict["asset_symbol"] = cards[0].asset.symbol
-            card_dict["asset_name"] = cards[0].asset.name
-        research_card = ResearchCardResponse(**card_dict)
+    # 优先从数据库缓存获取研究卡片
+    card = await ResearchService.generate_research_card(db, asset_uuid, force_refresh=False)
+    research_card = await ResearchService._build_response_from_db_card(card, db)
 
     predictions = await PredictionService.get_predictions(db, asset_id=asset_uuid, limit=1)
     latest_prediction = None
@@ -292,16 +286,21 @@ async def get_asset_analysis(
         page="asset_analysis", disclosure_type="comprehensive_risk"
     )
 
-    return AssetAnalysisResponse(
-        asset_id=str(asset_uuid),
-        asset_symbol=asset.symbol,
-        asset_name=asset.name,
-        current_price=current_price,
-        research_card=research_card,
-        latest_prediction=latest_prediction,
-        prediction_accuracy=PredictionAccuracy(**accuracy),
-        disclaimer=risk_disclaimer
-    )
+    # 直接返回数据，UnifiedJSONResponse会自动包装
+    return {
+        "asset_id": str(asset_uuid),
+        "asset_symbol": asset.symbol,
+        "asset_name": asset.name,
+        "current_price": float(current_price) if current_price else None,
+        "research_card": research_card,
+        "latest_prediction": latest_prediction,
+        "prediction_accuracy": accuracy,
+        "disclaimer": {
+            "content": risk_disclaimer.content,
+            "version": risk_disclaimer.version,
+            "accepted": risk_disclaimer.accepted
+        }
+    }
 
 
 # ============ 免责声明 ============

@@ -359,17 +359,30 @@ class AssetService:
         # 3. 实时获取行情数据
         asset = await self.get_asset_by_id(asset_id)
         if not asset:
+            logger.warning(f"Asset not found for id {asset_id}")
             return None
 
         connector = await self._get_connector(asset.asset_type)
         if not connector:
+            logger.warning(f"Connector not found for asset_type {asset.asset_type}")
             return None
 
         try:
             ds_symbol = SYMBOL_MAP.get(asset.symbol, asset.symbol)
+            logger.info(f"Fetching ticker for {asset.symbol}, ds_symbol={ds_symbol}")
+
             ticker = await connector.get_ticker(ds_symbol)
+            logger.info(f"Ticker received: last_price={ticker.last_price}, change_24h={ticker.change_24h}")
 
             price = ticker.last_price
+            if price is None or price == 0:
+                logger.warning(f"Invalid price for {asset.symbol}: {price}")
+                # 尝试从数据库获取最近价格
+                db_price = await get_latest_price(self.session, asset_id)
+                if db_price:
+                    price = db_price
+                else:
+                    return None
             # 获取足够的历史数据进行计算（需要至少30天）
             ohlcv_list = await self.get_ohlcv(asset_id, interval="1d", limit=60)
 

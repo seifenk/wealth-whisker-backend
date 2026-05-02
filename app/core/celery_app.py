@@ -50,6 +50,11 @@ celery_app.conf.update(
             "task": "scheduled_prediction_creation_crypto",
             "schedule": crontab(hour="*/4", minute=15),
         },
+        # 每4小时同步加密货币新闻
+        "crypto-news-sync": {
+            "task": "scheduled_crypto_news_sync",
+            "schedule": crontab(hour="*/4", minute=30),
+        },
 
         # ===== 股票任务（T+1盘后机制） =====
         # 每日17:00 UTC生成股票研究结论（美股收盘后）
@@ -61,6 +66,11 @@ celery_app.conf.update(
         "stock-prediction-creation": {
             "task": "scheduled_prediction_creation_stock",
             "schedule": crontab(hour=17, minute=15),
+        },
+        # 每日17:30 UTC同步股票新闻
+        "stock-news-sync": {
+            "task": "scheduled_stock_news_sync",
+            "schedule": crontab(hour=17, minute=30),
         },
 
         # ===== 基金任务（A股收盘后） =====
@@ -74,6 +84,11 @@ celery_app.conf.update(
             "task": "scheduled_prediction_creation_fund",
             "schedule": crontab(hour=7, minute=45),
         },
+        # 每日15:55 北京时间同步基金新闻
+        "fund-news-sync": {
+            "task": "scheduled_fund_news_sync",
+            "schedule": crontab(hour=7, minute=55),
+        },
 
         # ===== 黄金任务 =====
         # 每日17:05 UTC生成黄金研究结论
@@ -85,6 +100,11 @@ celery_app.conf.update(
         "gold-prediction-creation": {
             "task": "scheduled_prediction_creation_gold",
             "schedule": crontab(hour=17, minute=20),
+        },
+        # 每日17:35 UTC同步黄金新闻
+        "gold-news-sync": {
+            "task": "scheduled_gold_news_sync",
+            "schedule": crontab(hour=17, minute=35),
         },
 
         # ===== 通用任务（每日执行） =====
@@ -98,6 +118,16 @@ celery_app.conf.update(
             "task": "scheduled_auto_calibration",
             "schedule": crontab(hour=1, minute=0),  # UTC 01:00
         },
+        # 每日凌晨同步宏观经济新闻
+        "macro-news-sync": {
+            "task": "scheduled_macro_news_sync",
+            "schedule": crontab(hour=1, minute=30),
+        },
+        # 每日凌晨聚合情感快照
+        "sentiment-aggregation": {
+            "task": "scheduled_sentiment_aggregation",
+            "schedule": crontab(hour=2, minute=0),
+        },
     },
 )
 
@@ -107,5 +137,6 @@ celery_app.autodiscover_tasks([
     "app.tasks.backtest_worker",
     "app.tasks.model_calibration",
     "app.tasks.metrics_calculation",
-    "app.tasks.research_tasks",  # 新增研究结论自动化任务
+    "app.tasks.research_tasks",  # 研究结论自动化任务
+    "app.tasks.news_sync",       # 新闻数据同步任务
 ])
