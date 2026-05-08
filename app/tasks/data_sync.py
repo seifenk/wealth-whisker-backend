@@ -14,6 +14,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_app import celery_app
+from app.core.config import settings
 from app.core.database import async_session_maker
 from app.data.connectors import OKXConnector, YahooFinanceConnector, GoldConnector, EastMoneyConnector
 from app.models.asset import Asset, OHLCV, AssetMetric
@@ -243,7 +244,7 @@ def sync_crypto_data_task(self, symbols: Optional[List[str]] = None):
                             interval="1h",
                             start_time=start_time,
                             end_time=end_time,
-                            limit=168,
+                            limit=settings.CRYPTO_KLINE_LIMIT,
                         )
 
                         # 3. 保存K线数据
@@ -375,7 +376,7 @@ def sync_stock_data_task(self, symbols: Optional[List[tuple]] = None):
                             interval="1d",
                             start_time=start_time,
                             end_time=end_time,
-                            limit=30,
+                            limit=settings.STOCK_KLINE_LIMIT,
                         )
 
                         # 3. 保存K线数据
@@ -495,7 +496,7 @@ def sync_gold_data_task(self, symbols: Optional[List[tuple]] = None):
                             interval="1d",
                             start_time=start_time,
                             end_time=end_time,
-                            limit=30,
+                            limit=settings.STOCK_KLINE_LIMIT,
                         )
 
                         # 3. 保存K线数据
@@ -572,7 +573,7 @@ def sync_fund_data_task(self, symbols: Optional[List[tuple]] = None):
                             interval="1d",
                             start_time=start_time,
                             end_time=end_time,
-                            limit=30,
+                            limit=settings.FUND_DATA_LIMIT,
                         )
 
                         # 3. 保存净值数据

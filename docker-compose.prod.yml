@@ -1,0 +1,258 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB (生产配置，Alpine版本)
+  postgres:
+    image: timescale/timescaledb:2.11.0-pg15  # 固定版本
+    container_name: wealthwhisker-postgres-prod
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-wealthwhisker}
+    expose:
+      - "5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - wealthwhisker-network
+
+  # Redis (生产配置，Alpine版本)
+  redis:
+    image: redis:7.2.3-alpine  # Alpine版本，更小更稳定
+    container_name: wealthwhisker-redis-prod
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - wealthwhisker-network
+
+  # FastAPI Application (生产配置)
+  api:
+    image: wealthwhisker-app:${APP_VERSION:-v1.0.0}
+    container_name: wealthwhisker-api-prod
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # 数据库连接
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wealthwhisker}
+      - DATABASE_SYNC_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wealthwhisker}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      # 应用配置
+      - SECRET_KEY=${SECRET_KEY}
+      - DEBUG=false
+      - ENVIRONMENT=production
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      # API密钥
+      - OKX_API_KEY=${OKX_API_KEY}
+      - OKX_API_SECRET=${OKX_API_SECRET}
+      - OKX_API_PASSPHRASE=${OKX_API_PASSPHRASE}
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      # LLM配置
+      - LLM_ENABLED=${LLM_ENABLED:-false}
+      - LLM_API_BASE=${LLM_API_BASE}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      # 外部API配置
+      - YAHOO_FINANCE_API_URL=${YAHOO_FINANCE_API_URL:-https://query1.finance.yahoo.com}
+      - CRYPTOPANIC_API_URL=${CRYPTOPANIC_API_URL:-https://cryptopanic.com/api/v1/post/}
+      - NEWSAPI_URL=${NEWSAPI_URL:-https://newsapi.org/v2}
+      - EASTMONEY_API_URL=${EASTMONEY_API_URL:-http://fund.eastmoney.com}
+      - EASTMONEY_FUNDGZ_API_URL=${EASTMONEY_FUNDGZ_API_URL:-http://fundgz.eastmoney.com}
+      - ALPHA_VANTAGE_API_URL=${ALPHA_VANTAGE_API_URL:-https://www.alphavantage.co}
+      # 超时配置
+      - API_REQUEST_TIMEOUT=${API_REQUEST_TIMEOUT:-30}
+      - NEWS_API_TIMEOUT=${NEWS_API_TIMEOUT:-15}
+      # 数据同步限制
+      - CRYPTO_KLINE_LIMIT=${CRYPTO_KLINE_LIMIT:-168}
+      - STOCK_KLINE_LIMIT=${STOCK_KLINE_LIMIT:-30}
+      - FUND_DATA_LIMIT=${FUND_DATA_LIMIT:-30}
+      - NEWS_SYNC_LIMIT=${NEWS_SYNC_LIMIT:-20}
+      - MACRO_NEWS_LIMIT=${MACRO_NEWS_LIMIT:-10}
+      # 模型校准配置
+      - CALIBRATION_THRESHOLD=${CALIBRATION_THRESHOLD:-0.05}
+      - CRYPTO_CALIBRATION_INTERVAL_HOURS=${CRYPTO_CALIBRATION_INTERVAL_HOURS:-4}
+      - STOCK_CALIBRATION_SCHEDULE=${STOCK_CALIBRATION_SCHEDULE:-17:00}
+      # 代理配置（可选）
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - NO_PROXY=localhost,127.0.0.1,postgres,redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+    networks:
+      - wealthwhisker-network
+
+  # Celery Worker (生产配置)
+  celery-worker:
+    image: wealthwhisker-app:${APP_VERSION:-v1.0.0}
+    container_name: wealthwhisker-celery-worker-prod
+    environment:
+      # 数据库连接
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wealthwhisker}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      # 应用配置
+      - SECRET_KEY=${SECRET_KEY}
+      - DEBUG=false
+      - ENVIRONMENT=production
+      # API密钥
+      - OKX_API_KEY=${OKX_API_KEY}
+      - OKX_API_SECRET=${OKX_API_SECRET}
+      - OKX_API_PASSPHRASE=${OKX_API_PASSPHRASE}
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      # LLM配置
+      - LLM_ENABLED=${LLM_ENABLED:-false}
+      - LLM_API_BASE=${LLM_API_BASE}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      # 外部API配置
+      - YAHOO_FINANCE_API_URL=${YAHOO_FINANCE_API_URL:-https://query1.finance.yahoo.com}
+      - CRYPTOPANIC_API_URL=${CRYPTOPANIC_API_URL:-https://cryptopanic.com/api/v1/post/}
+      - NEWSAPI_URL=${NEWSAPI_URL:-https://newsapi.org/v2}
+      - EASTMONEY_API_URL=${EASTMONEY_API_URL:-http://fund.eastmoney.com}
+      - EASTMONEY_FUNDGZ_API_URL=${EASTMONEY_FUNDGZ_API_URL:-http://fundgz.eastmoney.com}
+      - ALPHA_VANTAGE_API_URL=${ALPHA_VANTAGE_API_URL:-https://www.alphavantage.co}
+      # 超时配置
+      - API_REQUEST_TIMEOUT=${API_REQUEST_TIMEOUT:-30}
+      - NEWS_API_TIMEOUT=${NEWS_API_TIMEOUT:-15}
+      # 数据同步限制
+      - CRYPTO_KLINE_LIMIT=${CRYPTO_KLINE_LIMIT:-168}
+      - STOCK_KLINE_LIMIT=${STOCK_KLINE_LIMIT:-30}
+      - FUND_DATA_LIMIT=${FUND_DATA_LIMIT:-30}
+      - NEWS_SYNC_LIMIT=${NEWS_SYNC_LIMIT:-20}
+      - MACRO_NEWS_LIMIT=${MACRO_NEWS_LIMIT:-10}
+      # 代理配置（可选）
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - NO_PROXY=localhost,127.0.0.1,postgres,redis
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A app.tasks.celery_app worker --loglevel=warning --concurrency=4
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - wealthwhisker-network
+
+  # Celery Beat (生产配置)
+  celery-beat:
+    image: wealthwhisker-app:${APP_VERSION:-v1.0.0}
+    container_name: wealthwhisker-celery-beat-prod
+    environment:
+      # 数据库连接
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wealthwhisker}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      # 应用配置
+      - DEBUG=false
+      - ENVIRONMENT=production
+      # 模型校准配置
+      - CALIBRATION_THRESHOLD=${CALIBRATION_THRESHOLD:-0.05}
+      - CRYPTO_CALIBRATION_INTERVAL_HOURS=${CRYPTO_CALIBRATION_INTERVAL_HOURS:-4}
+      - STOCK_CALIBRATION_SCHEDULE=${STOCK_CALIBRATION_SCHEDULE:-17:00}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A app.tasks.celery_app beat --loglevel=warning
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - wealthwhisker-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  wealthwhisker-network:
+    driver: bridge

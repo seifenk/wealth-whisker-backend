@@ -48,14 +48,14 @@ class EastMoneyConnector(BaseConnector):
             api_secret=None,
         )
         self._client: Optional[httpx.AsyncClient] = None
-        # 东方财富API的实际接口地址
-        self._api_base = "http://fundgz.eastmoney.com"
+        # 东方财富API的实际接口地址（基金估值）
+        self._api_base = settings.EASTMONEY_FUNDGZ_API_URL
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取HTTP客户端"""
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
-                timeout=30.0,
+                timeout=settings.API_REQUEST_TIMEOUT,
                 headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     "Referer": "http://fund.eastmoney.com/",
@@ -236,7 +236,7 @@ class EastMoneyConnector(BaseConnector):
                    f"start={start_str}, end={end_str}, limit={limit}")
 
         # 东方财富净值历史API
-        url = f"http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={symbol}&page=1&sdate={start_str}&edate={end_str}&per={limit}"
+        url = f"{settings.EASTMONEY_API_URL}/f10/F10DataApi.aspx?type=lsjz&code={symbol}&page=1&sdate={start_str}&edate={end_str}&per={limit}"
 
         html = await self._request_html(url)
 

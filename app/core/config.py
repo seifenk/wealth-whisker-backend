@@ -54,6 +54,7 @@ class Settings(BaseSettings):
 
     # Yahoo Finance (免费，无需API密钥)
     YAHOO_FINANCE_ENABLED: bool = True
+    YAHOO_FINANCE_API_URL: str = "https://query1.finance.yahoo.com"
 
     # Alpha Vantage (需要API密钥，备用)
     ALPHA_VANTAGE_API_KEY: Optional[str] = None
@@ -61,6 +62,7 @@ class Settings(BaseSettings):
 
     # 东方财富/天天基金 (中国基金数据)
     EASTMONEY_API_URL: str = "http://fund.eastmoney.com"
+    EASTMONEY_FUNDGZ_API_URL: str = "http://fundgz.eastmoney.com"  # 基金估值API
     EASTMONEY_ENABLED: bool = True
 
     # Metals API (黄金贵金属数据)
@@ -69,7 +71,20 @@ class Settings(BaseSettings):
 
     # News APIs (新闻数据源)
     CRYPTOPANIC_API_KEY: Optional[str] = None  # CryptoPanic加密货币新闻API
+    CRYPTOPANIC_API_URL: str = "https://cryptopanic.com/api/v1/post/"
     NEWSAPI_KEY: Optional[str] = None          # NewsAPI.org通用新闻API
+    NEWSAPI_URL: str = "https://newsapi.org/v2"
+
+    # API Request Timeout
+    API_REQUEST_TIMEOUT: int = 30              # API请求超时（秒）
+    NEWS_API_TIMEOUT: int = 15                 # 新闻API超时（秒）
+
+    # Data Sync Limits
+    CRYPTO_KLINE_LIMIT: int = 168              # 加密货币K线获取数量（7天小时线）
+    STOCK_KLINE_LIMIT: int = 30                # 股票K线获取数量
+    FUND_DATA_LIMIT: int = 30                  # 基金数据获取数量
+    NEWS_SYNC_LIMIT: int = 20                  # 新闻同步数量
+    MACRO_NEWS_LIMIT: int = 10                 # 宏观新闻数量
 
     # Data Sync
     DATA_SYNC_INTERVAL_MINUTES: int = 60

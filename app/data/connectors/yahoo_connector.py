@@ -28,7 +28,7 @@ class YahooFinanceConnector(BaseConnector):
 
     def __init__(self):
         super().__init__(
-            api_url="https://query1.finance.yahoo.com",
+            api_url=settings.YAHOO_FINANCE_API_URL,
             api_key=None,
             api_secret=None,
         )
@@ -109,7 +109,7 @@ class YahooFinanceConnector(BaseConnector):
                 period1 = int((end_time - timedelta(days=needed_days)).timestamp())
                 period2 = int(end_time.timestamp())
 
-                url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
+                url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
 
             # 场景2：传 start_time 和 end_time（时间范围查询）
             elif start_time and end_time:
@@ -119,7 +119,7 @@ class YahooFinanceConnector(BaseConnector):
                 period1 = int(start_time.timestamp())
                 period2 = int(end_time.timestamp())
 
-                url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
+                url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
 
             # 场景3：不传时间参数（首次加载）
             else:
@@ -154,9 +154,9 @@ class YahooFinanceConnector(BaseConnector):
                 else:
                     range_param = 'max'
 
-                url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={yf_interval}&range={range_param}'
+                url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/{symbol}?interval={yf_interval}&range={range_param}'
 
-            resp = self._session.get(url, timeout=30)
+            resp = self._session.get(url, timeout=settings.API_REQUEST_TIMEOUT)
             resp.raise_for_status()
 
             data = resp.json()
@@ -247,9 +247,9 @@ class YahooFinanceConnector(BaseConnector):
         try:
             # 使用chart API获取价格和涨跌幅（更稳定）
             # 获取最近2天数据以计算24小时涨跌幅
-            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d'
+            url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/{symbol}?interval=1d&range=2d'
 
-            resp = self._session.get(url, timeout=30)
+            resp = self._session.get(url, timeout=settings.API_REQUEST_TIMEOUT)
             resp.raise_for_status()
 
             data = resp.json()
@@ -378,8 +378,8 @@ class YahooFinanceConnector(BaseConnector):
         """
         try:
             # 使用requests测试连接
-            url = 'https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d'
-            resp = self._session.get(url, timeout=10)
+            url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/AAPL?interval=1d&range=1d'
+            resp = self._session.get(url, timeout=settings.API_REQUEST_TIMEOUT)
             resp.raise_for_status()
 
             data = resp.json()

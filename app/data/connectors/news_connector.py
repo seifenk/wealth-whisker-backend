@@ -14,6 +14,8 @@ import httpx
 import feedparser
 from abc import ABC, abstractmethod
 
+from app.core.config import settings
+
 
 class NewsConnectorBase(ABC):
     """新闻连接器基类"""
@@ -50,10 +52,9 @@ class CryptoPanicConnector(NewsConnectorBase):
     文档：https://cryptopanic.com/developers/api/
     """
 
-    API_URL = "https://cryptopanic.com/api/v1/post/"
-
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key
+        self.api_url = settings.CRYPTOPANIC_API_URL
 
     async def fetch_news(
         self,
@@ -90,8 +91,8 @@ class CryptoPanicConnector(NewsConnectorBase):
             params["q"] = " ".join(keywords)
 
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                response = await client.get(self.API_URL, params=params)
+            async with httpx.AsyncClient(timeout=settings.NEWS_API_TIMEOUT) as client:
+                response = await client.get(self.api_url, params=params)
                 response.raise_for_status()
                 data = response.json()
 
@@ -126,10 +127,9 @@ class NewsAPIConnector(NewsConnectorBase):
     文档：https://newsapi.org/docs
     """
 
-    API_URL = "https://newsapi.org/v2/everything"
-
     def __init__(self, api_key: str):
         self.api_key = api_key
+        self.api_url = f"{settings.NEWSAPI_URL}/everything"
 
     async def fetch_news(
         self,
@@ -178,8 +178,8 @@ class NewsAPIConnector(NewsConnectorBase):
             params["sources"] = ",".join(sources)
 
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                response = await client.get(self.API_URL, params=params)
+            async with httpx.AsyncClient(timeout=settings.NEWS_API_TIMEOUT) as client:
+                response = await client.get(self.api_url, params=params)
                 response.raise_for_status()
                 data = response.json()
 
@@ -210,7 +210,7 @@ class NewsAPIConnector(NewsConnectorBase):
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
         """获取头条新闻"""
-        url = "https://newsapi.org/v2/top-headlines"
+        url = f"{settings.NEWSAPI_URL}/top-headlines"
         params = {
             "apiKey": self.api_key,
             "category": category,
@@ -219,7 +219,7 @@ class NewsAPIConnector(NewsConnectorBase):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=settings.NEWS_API_TIMEOUT) as client:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
                 data = response.json()
@@ -370,10 +370,9 @@ class AlphaVantageNewsConnector(NewsConnectorBase):
     文档：https://www.alphavantage.co/documentation/#news-sentiment
     """
 
-    API_URL = "https://www.alphavantage.co/query"
-
     def __init__(self, api_key: str):
         self.api_key = api_key
+        self.api_url = settings.ALPHA_VANTAGE_API_URL
 
     async def fetch_news(
         self,
@@ -414,8 +413,8 @@ class AlphaVantageNewsConnector(NewsConnectorBase):
             params["topics"] = ",".join(topics)
 
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                response = await client.get(self.API_URL, params=params)
+            async with httpx.AsyncClient(timeout=settings.NEWS_API_TIMEOUT) as client:
+                response = await client.get(self.api_url, params=params)
                 response.raise_for_status()
                 data = response.json()
 

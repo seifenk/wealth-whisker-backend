@@ -1,0 +1,134 @@
+# ==================================================
+# Docker 忽略文件
+# ==================================================
+# 作用：
+# 1. 减小镜像大小（排除不必要文件）
+# 2. 加快构建速度（减少需要复制的文件）
+# 3. 避免敏感信息泄露（排除 .env 文件）
+# 4. 提升安全性（排除测试文件、IDE配置等）
+# ==================================================
+
+# Git 相关
+.git/
+.gitignore
+.gitattributes
+
+# 环境变量文件（敏感信息）
+.env
+.env.local
+.env.prod
+.env.prod.example
+.env.example
+*.env
+
+# Python 缓存和编译文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+
+# 测试相关
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+pytestdebug.log
+tests/
+test_*.py
+*_test.py
+
+# IDE 和编辑器配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# 文档和说明
+docs/
+*.md
+README.md
+LICENSE
+CLAUDE.md
+CHANGELOG.md
+
+# Docker 配置（镜像不需要）
+docker/
+Dockerfile
+Dockerfile.prod
+docker-compose.yml
+docker-compose.prod.yml
+.docker/
+
+# 日志文件
+logs/
+*.log
+log/
+
+# 数据库和缓存（不应打包到镜像）
+*.db
+*.sqlite
+*.sqlite3
+
+# 构建产物
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 临时文件
+tmp/
+temp/
+.tmp/
+.DS_Store
+Thumbs.db
+
+# 脚本和工具
+scripts/
+Makefile
+
+# 虚拟环境（不应打包）
+venv/
+env/
+ENV/
+.venv/
+
+# 备份文件
+*.bak
+*.backup
+*.old
+
+# 配置文件（开发用）
+.editorconfig
+.pre-commit-config.yaml
+.pylintrc
+.flake8
+setup.cfg
+tox.ini
+
+# ==================================================
+# 生产镜像应包含的内容（仅这些会被复制）
+# ==================================================
+# ✅ app/          - 应用代码
+# ✅ migrations/   - 数据库迁移
+# ✅ alembic.ini   - Alembic配置
+# ✅ requirements.txt - Python依赖列表
+# ==================================================

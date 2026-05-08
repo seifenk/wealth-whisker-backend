@@ -65,7 +65,7 @@ def sync_news_data_task(self, asset_type: Optional[str] = None):
                     articles = await aggregator.fetch_news_for_asset(
                         asset_type=asset.asset_type,
                         asset_symbol=asset.symbol,
-                        limit=10,
+                        limit=settings.MACRO_NEWS_LIMIT,
                     )
 
                     # 存储新闻并分析情感
@@ -258,7 +258,7 @@ def sync_macro_news_task():
             )
 
             # 获取宏观经济新闻
-            articles = await aggregator.fetch_macro_news(limit=20)
+            articles = await aggregator.fetch_macro_news(limit=settings.NEWS_SYNC_LIMIT)
 
             # 存储（不关联特定资产）
             stored_count = 0

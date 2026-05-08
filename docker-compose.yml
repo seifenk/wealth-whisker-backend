@@ -1,14 +1,14 @@
 version: '3.8'
 
 services:
-  # PostgreSQL with TimescaleDB
+  # PostgreSQL with TimescaleDB (Alpine版本，更小)
   postgres:
-    image: timescale/timescaledb:latest-pg15
+    image: timescale/timescaledb:latest-pg15  # 1.5GB
     container_name: wealthwhisker-postgres
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: wealthwhisker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-wealthwhisker}
     ports:
       - "5432:5432"
     volumes:
@@ -58,19 +58,35 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    image: wealthwhisker-app:latest  # 指定统一的镜像名
     container_name: wealthwhisker-api
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/wealthwhisker
-      - DATABASE_SYNC_URL=postgresql://postgres:postgres@postgres:5432/wealthwhisker
+      # 数据库连接（容器内使用服务名postgres，不从.env读取）
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-wealthwhisker}
+      - DATABASE_SYNC_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-wealthwhisker}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - DEBUG=true
-      # 代理配置（Clash端口7897）
-      - HTTP_PROXY=http://host.docker.internal:7897
-      - HTTPS_PROXY=http://host.docker.internal:7897
+      # 应用配置（从.env读取）
+      - SECRET_KEY=${SECRET_KEY}
+      - DEBUG=${DEBUG:-true}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      # API密钥（从.env读取，敏感信息）
+      - OKX_API_KEY=${OKX_API_KEY}
+      - OKX_API_SECRET=${OKX_API_SECRET}
+      - OKX_API_PASSPHRASE=${OKX_API_PASSPHRASE}
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      # LLM配置（从.env读取）
+      - LLM_ENABLED=${LLM_ENABLED:-false}
+      - LLM_API_BASE=${LLM_API_BASE}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      # 代理配置（可选，从.env读取）
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
       - NO_PROXY=localhost,127.0.0.1,postgres,redis,rabbitmq
     volumes:
       - ./app:/app/app:ro
@@ -84,18 +100,27 @@ services:
 
   # Celery Worker
   celery-worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: wealthwhisker-app:latest  # 共享同一个镜像
     container_name: wealthwhisker-celery-worker
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/wealthwhisker
+      # 数据库连接（容器内使用服务名postgres）
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-wealthwhisker}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      # 代理配置（Clash端口7897）
-      - HTTP_PROXY=http://host.docker.internal:7897
-      - HTTPS_PROXY=http://host.docker.internal:7897
+      # API密钥（从.env读取）
+      - OKX_API_KEY=${OKX_API_KEY}
+      - OKX_API_SECRET=${OKX_API_SECRET}
+      - OKX_API_PASSPHRASE=${OKX_API_PASSPHRASE}
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      # LLM配置（从.env读取）
+      - LLM_ENABLED=${LLM_ENABLED:-false}
+      - LLM_API_BASE=${LLM_API_BASE}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      # 代理配置（可选，从.env读取）
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
       - NO_PROXY=localhost,127.0.0.1,postgres,redis,rabbitmq
     volumes:
       - ./app:/app/app:ro
@@ -106,12 +131,11 @@ services:
 
   # Celery Beat (Scheduler)
   celery-beat:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: wealthwhisker-app:latest  # 共享同一个镜像
     container_name: wealthwhisker-celery-beat
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/wealthwhisker
+      # 数据库连接（容器内使用服务名postgres）
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-wealthwhisker}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
