@@ -54,6 +54,10 @@ class OKXConnector(BaseConnector):
                 'enableRateLimit': True,  # 启用请求限流，避免被封
                 'options': {
                     'defaultType': 'spot',  # 默认现货交易
+                    # 只加载现货市场。OKX 反向合约(BTC-USD-SWAP等)的 baseCcy 为 null，
+                    # 会触发 ccxt parse_market 的 `base + '/' + quote` 崩溃，
+                    # 导致整个 load_markets() 失败、所有行情不可用。
+                    'fetchMarkets': ['spot'],
                 },
             }
 

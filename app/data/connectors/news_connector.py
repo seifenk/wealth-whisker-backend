@@ -7,7 +7,7 @@
 - RSS订阅：财经媒体RSS源
 - Alpha Vantage：经济新闻+情感分析
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from loguru import logger
 import httpx
@@ -253,9 +253,7 @@ class RSSConnector(NewsConnectorBase):
     # 预设RSS源
     RSS_SOURCES = {
         # 国际财经媒体
-        "reuters_business": "https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best",
         "bloomberg_markets": "https://www.bloomberg.com/feed/podcast/bloomberg-markets.xml",
-        "wsj_markets": "https://feeds.a.dj.com/RSSMarketsMain.xml",
 
         # 加密货币媒体
         "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
@@ -263,12 +261,11 @@ class RSSConnector(NewsConnectorBase):
         "decrypt": "https://decrypt.co/feed",
 
         # 中文财经媒体
-        "caixin_finance": "https://www.caixin.com/rss_finance.xml",
         "eastmoney_news": "http://news.cnstock.com/rss.xml",
 
         # 官方公告源
-        "federal_reserve": "https://www.federalreserve.gov/feeds/press_releases.xml",
-        "sec_news": "https://www.sec.gov/cgi-bin/browse.cgi?action=getnews&type=newsreleases&company=&count=50&output=atom",
+        "federal_reserve": "https://www.federalreserve.gov/feeds/press_all.xml",
+        "sec_news": "https://www.sec.gov/news/pressreleases.rss",
     }
 
     def __init__(self, custom_sources: Optional[Dict[str, str]] = None):
@@ -319,7 +316,15 @@ class RSSConnector(NewsConnectorBase):
     ) -> List[Dict[str, Any]]:
         """获取单个RSS源"""
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            headers = {
+                "User-Agent": settings.SEC_USER_AGENT,
+                "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+            }
+            async with httpx.AsyncClient(
+                timeout=settings.NEWS_API_TIMEOUT,
+                follow_redirects=True,
+                headers=headers,
+            ) as client:
                 response = await client.get(rss_url)
                 response.raise_for_status()
 
@@ -340,9 +345,9 @@ class RSSConnector(NewsConnectorBase):
                 # 解析发布时间
                 published_at = None
                 if entry.get("published_parsed"):
-                    published_at = datetime(*entry.published_parsed[:6])
+                    published_at = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
                 elif entry.get("updated_parsed"):
-                    published_at = datetime(*entry.updated_parsed[:6])
+                    published_at = datetime(*entry.updated_parsed[:6], tzinfo=timezone.utc)
 
                 article = {
                     "title": title,
@@ -357,9 +362,204 @@ class RSSConnector(NewsConnectorBase):
 
             return articles
 
-        except Exception as e:
-            logger.error(f"RSS {source_name} parse failed: {e}")
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code if e.response is not None else "unknown"
+            logger.warning(f"RSS {source_name} unavailable: HTTP {status_code}")
             return []
+        except httpx.RequestError as e:
+            logger.warning(f"RSS {source_name} request failed: {e}")
+            return []
+        except Exception as e:
+            logger.warning(f"RSS {source_name} parse failed: {e}")
+            return []
+
+
+class SECFilingsConnector(NewsConnectorBase):
+    """SEC EDGAR公司申报连接器（无需API密钥）。"""
+
+    SUPPORTED_FORMS = {
+        "8-K",
+        "10-K",
+        "10-Q",
+        "6-K",
+        "20-F",
+        "40-F",
+        "DEF 14A",
+    }
+    _ticker_map_cache: Optional[Dict[str, str]] = None
+
+    def __init__(self, user_agent: Optional[str] = None):
+        self.api_url = settings.SEC_API_URL.rstrip("/")
+        self.tickers_url = settings.SEC_TICKERS_URL
+        self.user_agent = user_agent or settings.SEC_USER_AGENT
+        self.headers = {
+            "User-Agent": self.user_agent,
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip, deflate",
+        }
+
+    async def _get_json(self, url: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient(
+            timeout=settings.NEWS_API_TIMEOUT,
+            follow_redirects=True,
+            headers=self.headers,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+
+    async def _load_ticker_map(self) -> Dict[str, str]:
+        cached = type(self)._ticker_map_cache
+        if cached is not None:
+            return cached
+
+        data = await self._get_json(self.tickers_url)
+        ticker_map: Dict[str, str] = {}
+
+        fields = data.get("fields", [])
+        rows = data.get("data", [])
+        if fields and rows:
+            field_indexes = {name: index for index, name in enumerate(fields)}
+            ticker_index = field_indexes.get("ticker")
+            cik_index = field_indexes.get("cik")
+            if ticker_index is not None and cik_index is not None:
+                for row in rows:
+                    if len(row) <= max(ticker_index, cik_index):
+                        continue
+                    ticker = str(row[ticker_index] or "").strip().upper()
+                    cik = str(row[cik_index] or "").strip()
+                    if ticker and cik.isdigit():
+                        ticker_map[ticker] = cik
+        else:
+            for item in (data.values() if isinstance(data, dict) else []):
+                if not isinstance(item, dict):
+                    continue
+                ticker = str(item.get("ticker") or "").strip().upper()
+                cik = str(item.get("cik_str") or item.get("cik") or "").strip()
+                if ticker and cik.isdigit():
+                    ticker_map[ticker] = cik
+
+        type(self)._ticker_map_cache = ticker_map
+        logger.info(f"SEC ticker map loaded: {len(ticker_map)} companies")
+        return ticker_map
+
+    @staticmethod
+    def _parse_filing_date(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            if len(value) == 10:
+                return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _filing_url(cik: str, accession: str, primary_document: str) -> str:
+        cik_number = str(int(cik))
+        accession_without_dashes = accession.replace("-", "")
+        base_url = f"https://www.sec.gov/Archives/edgar/data/{cik_number}/{accession_without_dashes}"
+        return f"{base_url}/{primary_document}" if primary_document else f"{base_url}/{accession}-index.html"
+
+    async def fetch_news(
+        self,
+        keywords: Optional[List[str]] = None,
+        tickers: Optional[List[str]] = None,
+        limit: int = 20,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        requested_tickers = [
+            str(ticker).strip().upper()
+            for ticker in (tickers or [])
+            if str(ticker).strip()
+        ]
+        if not requested_tickers:
+            requested_tickers = [
+                str(keyword).strip().upper()
+                for keyword in (keywords or [])
+                if str(keyword).strip().isalnum()
+            ]
+        if not requested_tickers:
+            return []
+
+        try:
+            ticker_map = await self._load_ticker_map()
+        except Exception as e:
+            logger.warning(f"SEC ticker map fetch failed: {e}")
+            return []
+
+        articles: List[Dict[str, Any]] = []
+        for ticker in dict.fromkeys(requested_tickers):
+            cik = ticker_map.get(ticker)
+            if not cik:
+                logger.debug(f"SEC ticker not found: {ticker}")
+                continue
+
+            try:
+                submissions = await self._get_json(
+                    f"{self.api_url}/submissions/CIK{int(cik):010d}.json"
+                )
+            except Exception as e:
+                logger.warning(f"SEC filings fetch failed for {ticker}: {e}")
+                continue
+
+            recent = submissions.get("filings", {}).get("recent", {})
+            forms = recent.get("form", [])
+            for index, form in enumerate(forms):
+                base_form = str(form or "").split("/")[0]
+                if base_form not in self.SUPPORTED_FORMS:
+                    continue
+
+                def value(field: str, default: Any = "") -> Any:
+                    values = recent.get(field) or []
+                    return values[index] if index < len(values) else default
+
+                accession = str(value("accessionNumber", "") or "")
+                filing_date = str(value("filingDate", "") or "")
+                if not accession or not filing_date:
+                    continue
+
+                description = str(value("primaryDocDescription", "") or "")
+                report_date = str(value("reportDate", "") or "")
+                items = str(value("items", "") or "")
+                content_parts = [
+                    f"Form: {form}",
+                    f"Filing date: {filing_date}",
+                ]
+                if report_date:
+                    content_parts.append(f"Report date: {report_date}")
+                if items:
+                    content_parts.append(f"Items: {items}")
+                if description:
+                    content_parts.append(f"Description: {description}")
+
+                article = self._normalize_article({
+                    "title": f"{ticker} SEC {form} filing",
+                    "content": " | ".join(content_parts),
+                    "source": "sec",
+                    "source_name": "SEC EDGAR",
+                    "url": self._filing_url(
+                        cik,
+                        accession,
+                        str(value("primaryDocument", "") or ""),
+                    ),
+                    "published_at": self._parse_filing_date(filing_date),
+                    "category": "regulatory_filing",
+                })
+                article.update({
+                    "ticker": ticker,
+                    "filing_form": form,
+                    "accession_number": accession,
+                })
+                articles.append(article)
+
+        articles.sort(
+            key=lambda article: article.get("published_at") or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        logger.info(f"SEC EDGAR fetched {len(articles[:limit])} filings for {', '.join(requested_tickers)}")
+        return articles[:limit]
 
 
 class AlphaVantageNewsConnector(NewsConnectorBase):
@@ -460,6 +660,7 @@ class NewsAggregator:
         self.newsapi = NewsAPIConnector(newsapi_key) if newsapi_key else None
         self.rss = RSSConnector(rss_sources)
         self.alphavantage = AlphaVantageNewsConnector(alphavantage_key) if alphavantage_key else None
+        self.sec = SECFilingsConnector()
 
     async def fetch_news_for_asset(
         self,
@@ -497,7 +698,7 @@ class NewsAggregator:
             )
             articles.extend(rss_news)
 
-        # 股票/黄金：NewsAPI + 财经RSS + Alpha Vantage
+        # 股票/黄金：NewsAPI + Alpha Vantage + SEC EDGAR
         elif asset_type in ["stock", "gold"]:
             if self.newsapi:
                 stock_news = await self.newsapi.fetch_news(
@@ -514,13 +715,21 @@ class NewsAggregator:
                 )
                 articles.extend(av_news)
 
-            # 财经RSS补充
-            rss_news = await self.rss.fetch_news(
-                source_names=["reuters_business", "wsj_markets", "caixin_finance"],
-                keywords=[asset_symbol] + (keywords or []),
-                limit=10,
-            )
-            articles.extend(rss_news)
+            if asset_type == "stock":
+                sec_news = await self.sec.fetch_news(
+                    tickers=[asset_symbol],
+                    limit=limit,
+                )
+                articles.extend(sec_news)
+
+            # 只有主数据源全部没有结果时才访问官方RSS，避免对失效媒体源重复请求。
+            if not articles:
+                rss_news = await self.rss.fetch_news(
+                    source_names=["federal_reserve", "sec_news"],
+                    keywords=[asset_symbol] + (keywords or []),
+                    limit=10,
+                )
+                articles.extend(rss_news)
 
         # 基金：财经RSS + NewsAPI
         elif asset_type == "fund":
@@ -533,7 +742,7 @@ class NewsAggregator:
                 articles.extend(fund_news)
 
             rss_news = await self.rss.fetch_news(
-                source_names=["caixin_finance", "eastmoney_news"],
+                source_names=["eastmoney_news"],
                 keywords=[asset_symbol] + (keywords or []),
                 limit=10,
             )
@@ -597,10 +806,15 @@ class NewsAggregator:
                 unique_articles.append(article)
 
         # 按发布时间排序（最新的在前）
-        unique_articles.sort(
-            key=lambda x: x.get("published_at") or datetime.min,
-            reverse=True,
-        )
+        def sort_timestamp(article: Dict[str, Any]) -> datetime:
+            published_at = article.get("published_at")
+            if not isinstance(published_at, datetime):
+                return datetime.min.replace(tzinfo=timezone.utc)
+            if published_at.tzinfo is None:
+                return published_at.replace(tzinfo=timezone.utc)
+            return published_at.astimezone(timezone.utc)
+
+        unique_articles.sort(key=sort_timestamp, reverse=True)
 
         return unique_articles[:limit]
 

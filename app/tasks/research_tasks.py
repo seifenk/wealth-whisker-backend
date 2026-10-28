@@ -14,7 +14,7 @@ from sqlalchemy import select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_app import celery_app
-from app.core.database import async_session_maker
+from app.core.database import task_session_maker as async_session_maker
 from app.models.asset import Asset
 from app.models.research import ResearchCard, ModelPrediction
 from app.services.research_service import ResearchService, PredictionService, CalibrationService

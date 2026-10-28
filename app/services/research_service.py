@@ -278,9 +278,8 @@ class ResearchService:
         Returns:
             消息面分析结果字典
         """
-        from app.data.connectors.news_connector import RSSConnector, NewsAggregator
+        from app.data.connectors.news_connector import NewsAggregator
         from app.services.llm_service import llm_service
-        import asyncio
 
         try:
             # 根据资产类型选择新闻源
@@ -299,22 +298,16 @@ class ResearchService:
             elif asset_type == "fund":
                 keywords.extend(["基金", "fund", "理财"])
 
-            # 获取RSS新闻
-            rss = RSSConnector()
-
-            # 选择相关RSS源
-            source_names = None
-            if asset_type == "crypto":
-                source_names = ["coindesk", "cointelegraph", "decrypt"]
-            elif asset_type in ["stock", "gold"]:
-                source_names = ["reuters_business", "wsj_markets", "caixin_finance"]
-            elif asset_type == "fund":
-                source_names = ["caixin_finance", "eastmoney_news"]
-
-            articles = await rss.fetch_news(
-                source_names=source_names,
+            aggregator = NewsAggregator(
+                cryptopanic_key=settings.CRYPTOPANIC_API_KEY,
+                newsapi_key=settings.NEWSAPI_KEY,
+                alphavantage_key=settings.ALPHA_VANTAGE_API_KEY,
+            )
+            articles = await aggregator.fetch_news_for_asset(
+                asset_type=asset_type,
+                asset_symbol=asset_symbol,
                 keywords=keywords,
-                limit=5
+                limit=5,
             )
 
             if not articles:

@@ -1,19 +1,28 @@
 version: '3.8'
 
 services:
-  # PostgreSQL with TimescaleDB (生产配置，Alpine版本)
+  # PostgreSQL with TimescaleDB (2G内存优化配置)
   postgres:
-    image: timescale/timescaledb:2.11.0-pg15  # 固定版本
+    image: timescale/timescaledb:2.11.0-pg15
     container_name: wealthwhisker-postgres-prod
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-wealthwhisker}
+      # 限制PostgreSQL内存使用
+      POSTGRES_MAX_CONNECTIONS: 20
     expose:
       - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=512MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c max_connections=20
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -24,11 +33,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 4G
-        reservations:
           cpus: '1'
-          memory: 2G
+          memory: 768M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     logging:
       driver: "json-file"
       options:
@@ -37,15 +46,15 @@ services:
     networks:
       - wealthwhisker-network
 
-  # Redis (生产配置，Alpine版本)
+  # Redis (2G内存优化配置)
   redis:
-    image: redis:7.2.3-alpine  # Alpine版本，更小更稳定
+    image: redis:7.2.3-alpine
     container_name: wealthwhisker-redis-prod
     expose:
       - "6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --save "" --stop-writes-on-bgsave-error no
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -55,11 +64,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 2G
-        reservations:
           cpus: '0.5'
-          memory: 1G
+          memory: 320M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
     logging:
       driver: "json-file"
       options:
@@ -70,6 +79,9 @@ services:
 
   # FastAPI Application (生产配置)
   api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
     image: wealthwhisker-app:${APP_VERSION:-v1.0.0}
     container_name: wealthwhisker-api-prod
     ports:
@@ -90,6 +102,11 @@ services:
       - OKX_API_KEY=${OKX_API_KEY}
       - OKX_API_SECRET=${OKX_API_SECRET}
       - OKX_API_PASSPHRASE=${OKX_API_PASSPHRASE}
+      - CRYPTOPANIC_API_KEY=${CRYPTOPANIC_API_KEY}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - SEC_API_URL=${SEC_API_URL:-https://data.sec.gov}
+      - SEC_TICKERS_URL=${SEC_TICKERS_URL:-https://www.sec.gov/files/company_tickers_exchange.json}
+      - SEC_USER_AGENT=${SEC_USER_AGENT:-WealthWhisker/0.1.0}
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
       # LLM配置
       - LLM_ENABLED=${LLM_ENABLED:-false}
@@ -132,15 +149,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 4G
+          cpus: '1'
+          memory: 512M
         reservations:
-          cpus: '2'
-          memory: 2G
+          cpus: '0.5'
+          memory: 256M
     logging:
       driver: "json-file"
       options:
@@ -167,6 +184,11 @@ services:
       - OKX_API_KEY=${OKX_API_KEY}
       - OKX_API_SECRET=${OKX_API_SECRET}
       - OKX_API_PASSPHRASE=${OKX_API_PASSPHRASE}
+      - CRYPTOPANIC_API_KEY=${CRYPTOPANIC_API_KEY}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - SEC_API_URL=${SEC_API_URL:-https://data.sec.gov}
+      - SEC_TICKERS_URL=${SEC_TICKERS_URL:-https://www.sec.gov/files/company_tickers_exchange.json}
+      - SEC_USER_AGENT=${SEC_USER_AGENT:-WealthWhisker/0.1.0}
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
       # LLM配置
       - LLM_ENABLED=${LLM_ENABLED:-false}
@@ -197,15 +219,15 @@ services:
     depends_on:
       - postgres
       - redis
-    command: celery -A app.tasks.celery_app worker --loglevel=warning --concurrency=4
+    command: celery -A app.tasks.celery_app worker --loglevel=warning --concurrency=2 -O fair
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '0.5'
+          memory: 384M
         reservations:
-          cpus: '1'
-          memory: 1G
+          cpus: '0.25'
+          memory: 256M
     logging:
       driver: "json-file"
       options:
@@ -239,8 +261,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
     logging:
       driver: "json-file"
       options:

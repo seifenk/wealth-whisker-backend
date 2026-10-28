@@ -62,7 +62,9 @@ class Settings(BaseSettings):
 
     # 东方财富/天天基金 (中国基金数据)
     EASTMONEY_API_URL: str = "http://fund.eastmoney.com"
-    EASTMONEY_FUNDGZ_API_URL: str = "http://fundgz.eastmoney.com"  # 基金估值API
+    EASTMONEY_FUNDGZ_API_URL: str = "http://fundgz.eastmoney.com"  # 基金估值API(已废弃，保留兼容)
+    # 天天基金页面数据接口(稳定可用的全量净值源)
+    EASTMONEY_PINGZHONG_API_URL: str = "https://fund.eastmoney.com/pingzhongdata"
     EASTMONEY_ENABLED: bool = True
 
     # Metals API (黄金贵金属数据)
@@ -74,6 +76,10 @@ class Settings(BaseSettings):
     CRYPTOPANIC_API_URL: str = "https://cryptopanic.com/api/v1/post/"
     NEWSAPI_KEY: Optional[str] = None          # NewsAPI.org通用新闻API
     NEWSAPI_URL: str = "https://newsapi.org/v2"
+    SEC_API_URL: str = "https://data.sec.gov"
+    SEC_TICKERS_URL: str = "https://www.sec.gov/files/company_tickers_exchange.json"
+    # SEC要求User-Agent含联系邮箱（否则返回403 Forbidden）
+    SEC_USER_AGENT: str = "WealthWhisker/0.1.0 (wealthwhisker-research@example.com)"
 
     # API Request Timeout
     API_REQUEST_TIMEOUT: int = 30              # API请求超时（秒）

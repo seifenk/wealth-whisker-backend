@@ -56,6 +56,30 @@ class YahooFinanceConnector(BaseConnector):
             }
             logger.info(f"Yahoo connector using proxy: {https_proxy or http_proxy}")
 
+    def _request_json(self, url_tail: str) -> dict:
+        """
+        请求Yahoo API JSON，主域名失败时自动切换备用域名重试
+
+        Yahoo对数据中心IP限流严重，query1常返回429/403，导致股票/黄金行情不可用。
+        fallback到 query2 备用端点绕过限流，保证行情可用性。
+        """
+        last_error = None
+        hosts = (self.api_url, "https://query2.finance.yahoo.com")
+        for host in hosts:
+            url = f'{host}/v8/finance/chart/{url_tail}'
+            try:
+                resp = self._session.get(url, timeout=settings.API_REQUEST_TIMEOUT)
+                if resp.status_code in (429, 403, 500, 502, 503, 504):
+                    last_error = f"HTTP {resp.status_code} from {host}"
+                    logger.warning(f"Yahoo endpoint {host} limited, fallback to next")
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except requests.exceptions.RequestException as e:
+                last_error = str(e)
+                logger.warning(f"Yahoo endpoint {host} failed, fallback to next: {e}")
+        raise Exception(f"Yahoo 全部端点请求失败: {last_error}")
+
     async def get_ohlcv(self, symbol: str, interval: str = "1d",
                         start_time: Optional[datetime] = None,
                         end_time: Optional[datetime] = None,
@@ -109,7 +133,7 @@ class YahooFinanceConnector(BaseConnector):
                 period1 = int((end_time - timedelta(days=needed_days)).timestamp())
                 period2 = int(end_time.timestamp())
 
-                url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
+                url_tail = f'{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
 
             # 场景2：传 start_time 和 end_time（时间范围查询）
             elif start_time and end_time:
@@ -119,7 +143,7 @@ class YahooFinanceConnector(BaseConnector):
                 period1 = int(start_time.timestamp())
                 period2 = int(end_time.timestamp())
 
-                url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
+                url_tail = f'{symbol}?interval={yf_interval}&period1={period1}&period2={period2}'
 
             # 场景3：不传时间参数（首次加载）
             else:
@@ -154,12 +178,9 @@ class YahooFinanceConnector(BaseConnector):
                 else:
                     range_param = 'max'
 
-                url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/{symbol}?interval={yf_interval}&range={range_param}'
+                url_tail = f'{symbol}?interval={yf_interval}&range={range_param}'
 
-            resp = self._session.get(url, timeout=settings.API_REQUEST_TIMEOUT)
-            resp.raise_for_status()
-
-            data = resp.json()
+            data = self._request_json(url_tail)
             result = data.get('chart', {}).get('result', [])
 
             if not result:
@@ -247,12 +268,7 @@ class YahooFinanceConnector(BaseConnector):
         try:
             # 使用chart API获取价格和涨跌幅（更稳定）
             # 获取最近2天数据以计算24小时涨跌幅
-            url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/{symbol}?interval=1d&range=2d'
-
-            resp = self._session.get(url, timeout=settings.API_REQUEST_TIMEOUT)
-            resp.raise_for_status()
-
-            data = resp.json()
+            data = self._request_json(f'{symbol}?interval=1d&range=2d')
             result = data.get('chart', {}).get('result', [])
 
             if not result:
@@ -378,11 +394,7 @@ class YahooFinanceConnector(BaseConnector):
         """
         try:
             # 使用requests测试连接
-            url = f'{settings.YAHOO_FINANCE_API_URL}/v8/finance/chart/AAPL?interval=1d&range=1d'
-            resp = self._session.get(url, timeout=settings.API_REQUEST_TIMEOUT)
-            resp.raise_for_status()
-
-            data = resp.json()
+            data = self._request_json('AAPL?interval=1d&range=1d')
             return 'chart' in data and 'result' in data['chart']
         except Exception as e:
             logger.warning(f"Health check failed: {e}")

@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
-from app.core.database import async_session_maker
+from app.core.database import task_session_maker as async_session_maker
 from app.data.connectors import OKXConnector, YahooFinanceConnector, GoldConnector, EastMoneyConnector
+from app.data.constants import normalize_interval
 from app.models.asset import Asset, OHLCV, AssetMetric
 
 
@@ -106,9 +107,15 @@ async def save_ohlcv_data(
     """
     保存K线数据到数据库
 
+    统一使用 OKX 大写周期的 interval 存储（如 1H/1D），
+    与 asset_service.get_ohlcv 查询侧的 normalize_interval 保持一致，
+    避免同一资产数据因间隔大小写不一致（1d vs 1D）分桶存储导致查询缺失。
+
     Returns:
         新增数据数量
     """
+    # 标准化为 OKX 大写周期格式
+    stored_interval = normalize_interval(interval)
     if not ohlcv_list:
         return 0
 
@@ -120,7 +127,7 @@ async def save_ohlcv_data(
                 and_(
                     OHLCV.asset_id == asset_id,
                     OHLCV.time == ohlcv.time,
-                    OHLCV.interval == interval,
+                    OHLCV.interval == stored_interval,
                 )
             )
         )
@@ -130,7 +137,7 @@ async def save_ohlcv_data(
         new_ohlcv = OHLCV(
             time=ohlcv.time,
             asset_id=asset_id,
-            interval=interval,
+            interval=stored_interval,
             open=ohlcv.open,
             high=ohlcv.high,
             low=ohlcv.low,
@@ -275,7 +282,7 @@ def sync_crypto_data_task(self, symbols: Optional[List[str]] = None):
     # 运行异步任务
     asyncio.run(_sync())
 
-    return {"status": "completed", "synced_symbols": len(sync_symbols or CRYPTO_SYMBOLS)}
+    return {"status": "completed", "synced_symbols": len(symbols or CRYPTO_SYMBOLS)}
 
 
 @celery_app.task(bind=True, name="sync_crypto_tickers")
@@ -404,7 +411,7 @@ def sync_stock_data_task(self, symbols: Optional[List[tuple]] = None):
 
     asyncio.run(_sync())
 
-    return {"status": "completed", "synced_symbols": len(sync_symbols or STOCK_SYMBOLS)}
+    return {"status": "completed", "synced_symbols": len(symbols or STOCK_SYMBOLS)}
 
 
 @celery_app.task(bind=True, name="sync_stock_tickers")
@@ -524,7 +531,7 @@ def sync_gold_data_task(self, symbols: Optional[List[tuple]] = None):
 
     asyncio.run(_sync())
 
-    return {"status": "completed", "synced_symbols": len(sync_symbols or GOLD_SYMBOLS)}
+    return {"status": "completed", "synced_symbols": len(symbols or GOLD_SYMBOLS)}
 
 
 @celery_app.task(name="scheduled_gold_sync")
@@ -601,7 +608,7 @@ def sync_fund_data_task(self, symbols: Optional[List[tuple]] = None):
 
     asyncio.run(_sync())
 
-    return {"status": "completed", "synced_symbols": len(sync_symbols or FUND_SYMBOLS)}
+    return {"status": "completed", "synced_symbols": len(symbols or FUND_SYMBOLS)}
 
 
 @celery_app.task(name="scheduled_fund_sync")

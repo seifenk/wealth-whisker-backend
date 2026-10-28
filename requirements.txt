@@ -1,7 +1,7 @@
 # FastAPI and dependencies
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-pydantic==2.5.3
+pydantic==2.10.6
 pydantic-settings==2.1.0
 email-validator==2.1.0
 
@@ -29,12 +29,16 @@ scipy==1.11.4
 scikit-learn==1.4.0
 
 # HTTP clients
-httpx==0.26.0
-aiohttp==3.9.1
+httpx==0.28.1
+aiohttp==3.10.11
 
 # Data source SDKs (for real trading support)
 ccxt==4.2.25  # 统一加密货币交易所接口，支持OKX等多家交易所
 yfinance==0.2.36  # Yahoo Finance官方库，支持股票/ETF数据
+feedparser==6.0.11  # RSS订阅解析库
+
+# LLM integration
+litellm==1.94.0  # 统一调用不同LLM API
 
 # Utilities
 python-dotenv==1.0.0
@@ -44,7 +48,7 @@ loguru==0.7.2
 pytest==7.4.4
 pytest-asyncio==0.23.3
 pytest-cov==4.1.0
-httpx==0.26.0
+httpx==0.28.1
 
 # Development
 black==24.1.0

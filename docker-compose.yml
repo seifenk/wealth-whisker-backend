@@ -78,16 +78,21 @@ services:
       - OKX_API_KEY=${OKX_API_KEY}
       - OKX_API_SECRET=${OKX_API_SECRET}
       - OKX_API_PASSPHRASE=${OKX_API_PASSPHRASE}
+      - CRYPTOPANIC_API_KEY=${CRYPTOPANIC_API_KEY}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - SEC_API_URL=${SEC_API_URL:-https://data.sec.gov}
+      - SEC_TICKERS_URL=${SEC_TICKERS_URL:-https://www.sec.gov/files/company_tickers_exchange.json}
+      - SEC_USER_AGENT=${SEC_USER_AGENT:-WealthWhisker/0.1.0 (wealthwhisker-research@example.com)}
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
       # LLM配置（从.env读取）
       - LLM_ENABLED=${LLM_ENABLED:-false}
       - LLM_API_BASE=${LLM_API_BASE}
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
-      # 代理配置（可选，从.env读取）
-      - HTTP_PROXY=${HTTP_PROXY}
-      - HTTPS_PROXY=${HTTPS_PROXY}
-      - NO_PROXY=localhost,127.0.0.1,postgres,redis,rabbitmq
+      # 代理配置（可选，使用项目专用变量，避免被宿主机同名变量覆盖）
+      - HTTP_PROXY=${WEALTH_WHISKER_HTTP_PROXY:-}
+      - HTTPS_PROXY=${WEALTH_WHISKER_HTTPS_PROXY:-}
+      - NO_PROXY=localhost,127.0.0.1,postgres,redis,rabbitmq,host.docker.internal,.docker.internal
     volumes:
       - ./app:/app/app:ro
       - ./migrations:/app/migrations:ro
@@ -112,16 +117,21 @@ services:
       - OKX_API_KEY=${OKX_API_KEY}
       - OKX_API_SECRET=${OKX_API_SECRET}
       - OKX_API_PASSPHRASE=${OKX_API_PASSPHRASE}
+      - CRYPTOPANIC_API_KEY=${CRYPTOPANIC_API_KEY}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - SEC_API_URL=${SEC_API_URL:-https://data.sec.gov}
+      - SEC_TICKERS_URL=${SEC_TICKERS_URL:-https://www.sec.gov/files/company_tickers_exchange.json}
+      - SEC_USER_AGENT=${SEC_USER_AGENT:-WealthWhisker/0.1.0 (wealthwhisker-research@example.com)}
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
       # LLM配置（从.env读取）
       - LLM_ENABLED=${LLM_ENABLED:-false}
       - LLM_API_BASE=${LLM_API_BASE}
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
-      # 代理配置（可选，从.env读取）
-      - HTTP_PROXY=${HTTP_PROXY}
-      - HTTPS_PROXY=${HTTPS_PROXY}
-      - NO_PROXY=localhost,127.0.0.1,postgres,redis,rabbitmq
+      # 代理配置（可选，使用项目专用变量，避免被宿主机同名变量覆盖）
+      - HTTP_PROXY=${WEALTH_WHISKER_HTTP_PROXY:-}
+      - HTTPS_PROXY=${WEALTH_WHISKER_HTTPS_PROXY:-}
+      - NO_PROXY=localhost,127.0.0.1,postgres,redis,rabbitmq,host.docker.internal,.docker.internal
     volumes:
       - ./app:/app/app:ro
     depends_on:

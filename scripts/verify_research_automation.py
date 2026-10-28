@@ -15,7 +15,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from sqlalchemy import select
 
-from app.core.database import async_session_maker
+from app.core.database import task_session_maker as async_session_maker
 from app.models.asset import Asset
 from app.models.research import ResearchCard, ModelPrediction, ModelCalibrationLog
 from app.tasks.research_tasks import (

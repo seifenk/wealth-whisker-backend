@@ -3,7 +3,7 @@
 
 定时获取新闻数据并进行LLM情感分析
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 import asyncio
@@ -13,12 +13,27 @@ from sqlalchemy import select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_app import celery_app
-from app.core.database import async_session_maker
+from app.core.database import task_session_maker as async_session_maker
 from app.core.config import settings
 from app.models.asset import Asset
 from app.models.news import NewsArticle, SentimentSnapshot
 from app.data.connectors.news_connector import init_news_aggregator, get_news_aggregator
 from app.services.llm_service import llm_service
+
+
+def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    统一为naive UTC时间
+
+    NewsArticle.published_at/collected_at 是 DateTime(timestamp without timezone)列，
+    RSS/页面解析出的时间可能带tzinfo(aware)。asyncpg 对 naive/aware 混用会报
+    "can't subtract offset-naive and offset-aware datetimes"，入库前必须统一。
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 @celery_app.task(bind=True, name="sync_news_data")
@@ -84,7 +99,8 @@ def sync_news_data_task(self, asset_type: Optional[str] = None):
                         # LLM情感分析（如果启用）
                         if settings.LLM_ENABLED and article_data.get("content"):
                             sentiment_result = await llm_service.analyze_sentiment(
-                                text=f"{article_data['title']}\n{article_data['content'][:500]}"
+                                title=article_data.get("title", ""),
+                                content=article_data.get("content", "")[:500],
                             )
                             article_data["sentiment"] = sentiment_result.get("sentiment", "neutral")
                             article_data["sentiment_score"] = sentiment_result.get("sentiment_score", 0.5)
@@ -98,7 +114,7 @@ def sync_news_data_task(self, asset_type: Optional[str] = None):
                             source=article_data.get("source", "unknown"),
                             source_name=article_data.get("source_name", ""),
                             url=article_data.get("url", ""),
-                            published_at=article_data.get("published_at"),
+                            published_at=_to_naive_utc(article_data.get("published_at")),
                             collected_at=datetime.utcnow(),
                             sentiment=article_data.get("sentiment", "neutral"),
                             sentiment_score=article_data.get("sentiment_score", 0.5),
@@ -274,7 +290,8 @@ def sync_macro_news_task():
                 # LLM分析（如果启用）
                 if settings.LLM_ENABLED:
                     sentiment_result = await llm_service.analyze_sentiment(
-                        text=f"{article_data['title']}\n{article_data.get('content', '')[:500]}"
+                        title=article_data.get("title", ""),
+                        content=article_data.get("content", "")[:500],
                     )
                     article_data["sentiment"] = sentiment_result.get("sentiment", "neutral")
                     article_data["sentiment_score"] = sentiment_result.get("sentiment_score", 0.5)
@@ -286,7 +303,7 @@ def sync_macro_news_task():
                     source=article_data.get("source", "unknown"),
                     source_name=article_data.get("source_name", ""),
                     url=article_data.get("url", ""),
-                    published_at=article_data.get("published_at"),
+                    published_at=_to_naive_utc(article_data.get("published_at")),
                     collected_at=datetime.utcnow(),
                     sentiment=article_data.get("sentiment", "neutral"),
                     sentiment_score=article_data.get("sentiment_score", 0.5),

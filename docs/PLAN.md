@@ -18,6 +18,32 @@
 
 **测试覆盖率**：41%（78个测试，LLM服务69%覆盖率）
 
+**最近修复（2026-08-21 Docker 生产问题）**：
+
+- ✅ **Celery worker asyncpg 并发错误修复**
+    - 根因：全局单例 async engine 连接池被多个任务的事件循环跨环复用，导致 `InterfaceError: another operation is in progress`
+    - 修复：`app/core/database.py` 新增 `task_session_maker`（NullPool），工具任务改为使用独立引擎
+    - 验证：`scheduled_research_generation_crypto` 任务成功生成 5 张加密货币研究卡片（此前从未入库）
+- ✅ **东方财富基金数据 302 修复**
+    - 根因：旧接口 `fundgz.eastmoney.com` 已废弃（302 重定向）、`F10DataApi.aspx` 404
+    - 修复：改用天天基金 `pingzhongdata/{code}.js` 全量历史净值接口（一次请求全量，无需 Referer）
+    - 验证：基金净值/OHLCV/详情均正常（华夏000001 净值1.329等）
+- ✅ **OKX 加密货币数据源修复**
+    - 根因：设置 `options.fetchMarkets=['spot']` 之前，ccxt `load_markets()` 解析 OKX 反向合约（baseCcy=null）时崩溃 `None + '/' + str`
+    - 修复：`app/data/connectors/okx_connector.py` 限定只加载现货市场
+    - 验证：BTC/ETH/SOL/XRP/DOGE 实时行情正常返回
+- ✅ **LLM 502 网关问题修复**（根因是容器内代理环路，已解决）
+    - 表象：宿主机 `curl localhost:8317/v1/chat/completions` 成功，但容器内调用返回 502
+    - 根因：`docker-compose.yml` 为 api/celery-worker 设置了 `HTTP_PROXY=http://host.docker.internal:7897`，但 `NO_PROXY` 缺少 `host.docker.internal`，导致 LLM 请求（http://host.docker.internal:8317/v1）被错误发往 Clash 代理 7897 转发失败 → 502
+    - 修复：compose 两处 `NO_PROXY` 追加 `host.docker.internal,.docker.internal`，内网地址绕过代理直连
+    - 验证：litellm 及 LLMService 在 api/celery-worker 容器内调用成功（研究结论/情感分析正常），OKX 等外部 API 仍走代理不受影响
+- ✅ **数据源网络错误修复**（SEC 403 / Yahoo 429 / 新闻入库崩溃）
+    - 【SEC 403】SEC.gov 要求 User-Agent 含联系邮箱，原值 `WealthWhisker/0.1.0` 触发 403；改为 `WealthWhisker/0.1.0 (wealthwhisker-research@example.com)`（config 默认 + compose fallback 两处），实测 200
+    - 【Yahoo 429】query1 对数据中心 IP 限流严重（浏览器 UA 也 429）；`yahoo_connector` 新增 `_request_json()`，query1 失败（429/403/5xx）时自动 fallback 到 `query2.finance.yahoo.com`（实测 200），股票/黄金行情恢复
+    - 【新闻入库 DBAPIError】RSS 的 `published_at` 是 aware datetime，而模型列是 naive DateTime，asyncpg 报 `can't subtract offset-naive and offset-aware`；`news_sync` 新增 `_to_naive_utc()` 统一为 naive UTC，`scheduled_crypto_news_sync` 恢复成功（8条/0错误）
+    - 【说明】`api.metals.live` TLS 证书已失效（属外部站点下线，非代码问题）；GoldConnector 实际走 Yahoo（GC=F/GLD），不受影响
+    - 验证：AAPL 310.3 / GLD 424.1 / SEC 200 / 新闻任务 error_count=0
+
 **最近新增**：
 
 - ✅ 研究结论卡片新格式（匹配前端接口）
